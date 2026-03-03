@@ -1,15 +1,20 @@
 <?php
 require '/lib.php';
+require '/logo.php';
 
 $did_epd = false;
 
 while (true) {
     if (!$did_epd) {
-        $w = 8;
-        $h = 8;
-        $buf = "\x3C\x42\xA5\x81\xA5\x99\x42\x3C";
+        $w = PHP_LOGO_W;
+        $h = PHP_LOGO_H;
+        $buf = php_logo_bytes();
         print "epd:render\n";
-        mcu_epd_render($buf, $w, $h);
+        if ($buf !== '') {
+            mcu_epd_render($buf, $w, $h);
+        } else {
+            print "epd:logo-bytes-fail\n";
+        }
         $did_epd = true;
     }
 
