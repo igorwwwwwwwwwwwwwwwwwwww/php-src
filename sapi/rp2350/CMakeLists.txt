@@ -101,7 +101,9 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/streams/userspace.c
   ${PHP_SRC_ROOT}/main/SAPI.c
   ${PHP_SRC_ROOT}/main/main.c
+  ${PHP_SRC_ROOT}/main/output.c
   ${PHP_SRC_ROOT}/main/php_content_types.c
+  ${PHP_SRC_ROOT}/main/php_ini.c
   ${PHP_SRC_ROOT}/main/php_ticks.c
   ${PHP_SRC_ROOT}/main/php_variables.c
   ${PHP_SRC_ROOT}/main/fopen_wrappers.c
@@ -110,6 +112,7 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/spprintf.c
   ${PHP_SRC_ROOT}/main/strlcpy.c
   ${PHP_SRC_ROOT}/ext/standard/file.c
+  ${PHP_SRC_ROOT}/ext/standard/head.c
   ${PHP_SRC_ROOT}/ext/standard/string.c
   ${PHP_SRC_ROOT}/ext/standard/url.c
   ${PHP_SRC_ROOT}/TSRM/TSRM.c

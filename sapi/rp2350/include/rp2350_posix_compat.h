@@ -5,6 +5,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <utime.h>
+#include <dirent.h>
 
 char *getcwd(char *buf, size_t size);
 int lstat(const char *path, struct stat *buf);
@@ -12,6 +13,10 @@ ssize_t readlink(const char *path, char *buf, size_t bufsiz);
 int symlink(const char *target, const char *linkpath);
 int link(const char *oldpath, const char *newpath);
 int utime(const char *filename, const struct utimbuf *times);
+int scandir(const char *dirp, struct dirent ***namelist,
+	int (*filter)(const struct dirent *),
+	int (*compar)(const struct dirent **, const struct dirent **));
+int alphasort(const struct dirent **a, const struct dirent **b);
 
 #ifndef LOG_ERR
 #define LOG_ERR 3

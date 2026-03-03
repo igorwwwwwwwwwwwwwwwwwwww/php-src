@@ -126,25 +126,6 @@ PHPAPI int php_register_internal_extensions(void)
 	return SUCCESS;
 }
 
-void php_init_config(void) {}
-void php_shutdown_config(void) {}
-void php_ini_register_extensions(void) {}
-
-PHPAPI zval *cfg_get_entry_ex(zend_string *name)
-{
-	(void)name;
-	return NULL;
-}
-
-PHPAPI zend_result cfg_get_long(const char *varname, zend_long *result)
-{
-	(void)varname;
-	if (result) {
-		*result = 0;
-	}
-	return FAILURE;
-}
-
 PHPAPI void destroy_uploaded_files_hash(void) {}
 
 static uint32_t rp2350_stub_prng = 0x9e3779b9u;
@@ -205,25 +186,6 @@ PHPAPI zend_string *php_format_date(const char *format, size_t format_len, time_
 PHPAPI void php_call_shutdown_functions(void) {}
 PHPAPI void php_free_shutdown_functions(void) {}
 
-PHPAPI void php_output_startup(void) {}
-PHPAPI void php_output_shutdown(void) {}
-PHPAPI int php_output_activate(void) { return SUCCESS; }
-PHPAPI void php_output_deactivate(void) {}
-PHPAPI void php_output_set_implicit_flush(int flush) { (void)flush; }
-PHPAPI const char *php_output_get_start_filename(void) { return NULL; }
-PHPAPI int php_output_get_start_lineno(void) { return 0; }
-PHPAPI size_t php_output_write_unbuffered(const char *str, size_t len) { return rp2350_platform_write(str, len); }
-PHPAPI size_t php_output_write(const char *str, size_t len) { return rp2350_platform_write(str, len); }
-PHPAPI void php_output_end_all(void) {}
-PHPAPI void php_output_discard_all(void) {}
-PHPAPI zend_result php_output_start_user(zval *output_handler, size_t chunk_size, int flags)
-{
-	(void)output_handler;
-	(void)chunk_size;
-	(void)flags;
-	return SUCCESS;
-}
-
 PHPAPI void php_print_info_htmlhead(void) {}
 PHPAPI void php_print_info(int flag) { (void)flag; }
 PHPAPI void php_print_style(void) {}
@@ -239,7 +201,6 @@ PHPAPI void php_info_print_box_end(void) {}
 PHPAPI void php_info_print_hr(void) {}
 PHPAPI void php_info_print_module(zend_module_entry *module) { (void)module; }
 PHPAPI zend_string *php_get_uname(char mode) { (void)mode; return zend_string_init("rp2350", sizeof("rp2350") - 1, 0); }
-PHPAPI ZEND_COLD void display_ini_entries(zend_module_entry *module) { (void)module; }
 
 PHPAPI HashTable *php_stream_xport_get_hash(void)
 {

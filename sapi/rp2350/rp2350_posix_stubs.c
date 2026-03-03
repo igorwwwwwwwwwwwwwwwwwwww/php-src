@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <utime.h>
+#include <dirent.h>
 
 char *getenv(const char *name)
 {
@@ -145,4 +146,23 @@ int flock(int fd, int operation)
 	(void) operation;
 	errno = ENOSYS;
 	return -1;
+}
+
+int scandir(const char *dirp, struct dirent ***namelist,
+	int (*filter)(const struct dirent *),
+	int (*compar)(const struct dirent **, const struct dirent **))
+{
+	(void)dirp;
+	(void)namelist;
+	(void)filter;
+	(void)compar;
+	errno = ENOSYS;
+	return -1;
+}
+
+int alphasort(const struct dirent **a, const struct dirent **b)
+{
+	(void)a;
+	(void)b;
+	return 0;
 }
