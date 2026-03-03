@@ -24,6 +24,7 @@
 #include "rp2350_vfs.h"
 
 static bool rp2350_zend_started = false;
+static const char *rp2350_eval_error = "ok";
 
 typedef struct {
 	const char *src;
@@ -313,8 +314,11 @@ static void rp2350_zend_random_bytes_insecure(zend_random_bytes_insecure_state *
 int rp2350_eval_startup(void)
 {
 	zend_utility_functions zuf = {0};
+	char diag[160];
+	int n;
 
 	if (rp2350_zend_started) {
+		rp2350_eval_error = "ok";
 		return 0;
 	}
 
@@ -335,15 +339,46 @@ int rp2350_eval_startup(void)
 	zuf.random_bytes_insecure_function = rp2350_zend_random_bytes_insecure;
 
 	zend_startup(&zuf);
-	if (!rp2350_psram_install_zend_mm()) {
-		rp2350_platform_write("[psram] Zend MM install FAIL\r\n",
-			sizeof("[psram] Zend MM install FAIL\r\n") - 1);
+	n = snprintf(diag, sizeof(diag),
+		"[zend] after startup: ce_exception=%p ce_error=%p\r\n",
+		(void *)zend_ce_exception, (void *)zend_ce_error);
+	if (n > 0) {
+		rp2350_platform_write(diag, (size_t)n);
+	}
+
+	/* Run internal module MINITs (Core, etc), which registers exception classes. */
+	zend_startup_modules();
+	zend_collect_module_handlers();
+	n = snprintf(diag, sizeof(diag),
+		"[zend] after startup_modules: ce_exception=%p ce_error=%p\r\n",
+		(void *)zend_ce_exception, (void *)zend_ce_error);
+	if (n > 0) {
+		rp2350_platform_write(diag, (size_t)n);
+	}
+	if (zend_ce_exception == NULL || zend_ce_error == NULL) {
+		rp2350_platform_write("[zend] core classes missing after zend_startup_modules\r\n",
+			sizeof("[zend] core classes missing after zend_startup_modules\r\n") - 1);
+		rp2350_eval_error = "missing core classes after zend_startup_modules";
 		return -1;
 	}
 	if (zend_register_functions(NULL, rp2350_mcu_functions, NULL, MODULE_PERSISTENT) == FAILURE) {
+		rp2350_eval_error = "zend_register_functions failed";
 		return -1;
 	}
 	if (zend_post_startup() == FAILURE) {
+		rp2350_eval_error = "zend_post_startup failed";
+		return -1;
+	}
+	n = snprintf(diag, sizeof(diag),
+		"[zend] after post_startup: ce_exception=%p ce_error=%p\r\n",
+		(void *)zend_ce_exception, (void *)zend_ce_error);
+	if (n > 0) {
+		rp2350_platform_write(diag, (size_t)n);
+	}
+	if (zend_ce_exception == NULL || zend_ce_error == NULL) {
+		rp2350_platform_write("[zend] core classes missing after zend_post_startup\r\n",
+			sizeof("[zend] core classes missing after zend_post_startup\r\n") - 1);
+		rp2350_eval_error = "missing core classes after zend_post_startup";
 		return -1;
 	}
 
@@ -356,6 +391,7 @@ int rp2350_eval_startup(void)
 
 	zend_activate();
 	rp2350_zend_started = true;
+	rp2350_eval_error = "ok";
 	return 0;
 }
 
@@ -368,12 +404,22 @@ int rp2350_eval_execute(const char *code, size_t len)
 
 	if (zend_eval_stringl(code, len, NULL, "rp2350_main") == FAILURE) {
 		if (EG(exception)) {
+			(void)zend_exception_error(EG(exception), E_WARNING);
 			zend_clear_exception();
+			rp2350_eval_error = "zend_eval_stringl exception";
+		} else {
+			rp2350_eval_error = "zend_eval_stringl failure";
 		}
 		return -1;
 	}
 
+	rp2350_eval_error = "ok";
 	return 0;
+}
+
+const char *rp2350_eval_last_error(void)
+{
+	return rp2350_eval_error;
 }
 
 int rp2350_eval_execute_file(const char *path)
@@ -386,11 +432,16 @@ int rp2350_eval_execute_file(const char *path)
 	}
 
 	zend_stream_init_filename(&file_handle, path);
-	if (zend_execute_script(ZEND_REQUIRE, NULL, &file_handle) == FAILURE) {
+	if (zend_execute_script(ZEND_REQUIRE_ONCE, NULL, &file_handle) == FAILURE) {
 		if (EG(exception)) {
+			(void)zend_exception_error(EG(exception), E_WARNING);
 			zend_clear_exception();
+			rp2350_eval_error = "zend_execute_script exception";
+		} else {
+			rp2350_eval_error = "zend_execute_script failure";
 		}
 		return -1;
 	}
+	rp2350_eval_error = "ok";
 	return 0;
 }

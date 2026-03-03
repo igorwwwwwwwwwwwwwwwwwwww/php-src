@@ -1,5 +1,5 @@
 /*
- * PSRAM initialisation and Zend MM integration for RP2350.
+ * PSRAM initialisation for RP2350.
  *
  * The Badger 2350 carries an APS6404L 8 MB QSPI PSRAM on CS1 (GPIO 8).
  *
@@ -17,7 +17,7 @@
  * We only assert CS1N in direct mode, leaving CS0 alone.
  *
  * After init, PSRAM is mapped read/write at XIP address 0x11000000.
- * We point the Zend MM chunk allocator at that region.
+ * Zend allocator integration is done separately via rp2350_mmap.c.
  *
  * Register references:
  *   RP2350 datasheet §4.10 (QMI), §4.9 (XIP), §2.19.6.1 (GPIO functions).
@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "pico/stdlib.h"
 #include "pico/platform/sections.h"
@@ -36,8 +37,6 @@
 #include "hardware/structs/xip.h"
 #include "hardware/regs/qmi.h"
 #include "hardware/regs/xip.h"
-
-#include "Zend/zend_alloc.h"
 
 #include "rp2350_psram.h"
 #include "rp2350_transport.h"
@@ -152,59 +151,7 @@ static void __no_inline_not_in_flash_func(psram_read_id)(uint8_t *mfid, uint8_t 
     direct_end();
 }
 
-/* -------------------------------------------------------------------------
- * Zend MM chunk storage backed by PSRAM
- *
- * ZEND_MM_CHUNK_SIZE == 2 MB. PSRAM is 8 MB → 4 chunks.
- * We hand them out linearly and never reclaim (single-execution firmware).
- * ------------------------------------------------------------------------- */
-
-#define PSRAM_CHUNK_COUNT   (RP2350_PSRAM_SIZE / ZEND_MM_CHUNK_SIZE)   /* 4 */
-
-typedef struct {
-    uint8_t  *base;
-    uint32_t  used;
-} psram_storage_data_t;
-
-static psram_storage_data_t s_psram_data;
 static bool s_psram_ready = false;
-
-static void *psram_chunk_alloc(zend_mm_storage *storage, size_t size, size_t alignment)
-{
-    psram_storage_data_t *d = (psram_storage_data_t *)storage->data;
-
-    if (size != ZEND_MM_CHUNK_SIZE || alignment != ZEND_MM_CHUNK_SIZE) {
-        return NULL;
-    }
-    if (d->used >= PSRAM_CHUNK_COUNT) {
-        return NULL;
-    }
-
-    void *ptr = d->base + d->used * ZEND_MM_CHUNK_SIZE;
-    d->used++;
-    memset(ptr, 0, ZEND_MM_CHUNK_SIZE);
-    return ptr;
-}
-
-static void psram_chunk_free(zend_mm_storage *storage, void *chunk, size_t size)
-{
-    (void)storage; (void)chunk; (void)size;
-    /* Not reclaimed — firmware runs one PHP script per boot. */
-}
-
-static bool psram_chunk_truncate(zend_mm_storage *storage, void *chunk,
-                                  size_t old_size, size_t new_size)
-{
-    (void)storage; (void)chunk; (void)old_size; (void)new_size;
-    return false;
-}
-
-static bool psram_chunk_extend(zend_mm_storage *storage, void *chunk,
-                                size_t old_size, size_t new_size)
-{
-    (void)storage; (void)chunk; (void)old_size; (void)new_size;
-    return false;
-}
 
 /* -------------------------------------------------------------------------
  * Public init — called once from main() after stdio_init_all()
@@ -212,6 +159,10 @@ static bool psram_chunk_extend(zend_mm_storage *storage, void *chunk,
 
 bool rp2350_psram_init(uint cs_gpio)
 {
+    if (s_psram_ready) {
+        return true;
+    }
+
     /* 1. Route GPIO to XIP CS1 so QMI can drive it as chip-select */
     gpio_set_function(cs_gpio, GPIO_FUNC_XIP_CS1);
     sleep_us(10);
@@ -249,13 +200,12 @@ bool rp2350_psram_init(uint cs_gpio)
 
     /* 5. Program QMI M1 for QPI operation.
      *
-     * Timing: CLKDIV=2 (sys_clk/2 ≈ 62.5 MHz), RXDELAY=1 half-cycle,
+     * Timing: CLKDIV=4 (sys_clk/4 ≈ 31.25 MHz), RXDELAY=1 half-cycle,
      *         COOLDOWN=1 (one idle cycle between CS assertions).
      *
      * Read format (EBh):
-     *   prefix=8b quad, addr=24b quad, dummy=4×4b=16 half-clocks quad,
-     *   data=quad.  APS6404L EBh needs 6 dummy clocks at ≤84 MHz; we use
-     *   DUMMY_LEN=4 which is 16 half-clocks = 8 clocks — safe margin.
+     *   prefix=8b quad, addr=24b quad, dummy=6 clocks, data=quad.
+     * APS6404L expects a strict 6-cycle read latency here.
      *
      * Write format (38h):
      *   prefix=8b quad, addr=24b quad, no dummy, data=quad.
@@ -266,11 +216,11 @@ bool rp2350_psram_init(uint cs_gpio)
          * Force CS breaks every 1024 bytes to keep linear XIP semantics. */
         | (QMI_M1_TIMING_PAGEBREAK_VALUE_1024 << QMI_M1_TIMING_PAGEBREAK_LSB)
         | (1u << QMI_M1_TIMING_RXDELAY_LSB)
-        | (2u << QMI_M1_TIMING_CLKDIV_LSB);
+        | (4u << QMI_M1_TIMING_CLKDIV_LSB);
 
     qmi_hw->m[1].rfmt =
           (QMI_M1_RFMT_PREFIX_LEN_VALUE_8   << QMI_M1_RFMT_PREFIX_LEN_LSB)
-        | (QMI_M1_RFMT_DUMMY_LEN_VALUE_4    << QMI_M1_RFMT_DUMMY_LEN_LSB)
+        | (6u                              << QMI_M1_RFMT_DUMMY_LEN_LSB)
         | (QMI_M1_RFMT_DATA_WIDTH_VALUE_Q   << QMI_M1_RFMT_DATA_WIDTH_LSB)
         | (QMI_M1_RFMT_DUMMY_WIDTH_VALUE_Q  << QMI_M1_RFMT_DUMMY_WIDTH_LSB)
         | (QMI_M1_RFMT_ADDR_WIDTH_VALUE_Q   << QMI_M1_RFMT_ADDR_WIDTH_LSB)
@@ -289,19 +239,30 @@ bool rp2350_psram_init(uint cs_gpio)
     /* 6. Enable write-through for XIP window 1 */
     hw_set_bits(&xip_ctrl_hw->ctrl, XIP_CTRL_WRITABLE_M1_BITS);
 
-    /* 7. Sanity check: write and read back a word via XIP */
-    volatile uint32_t *p = (volatile uint32_t *)RP2350_PSRAM_BASE;
-    *p = 0xDEADBEEFu;
-    /* Flush the XIP write-buffer so the read comes from PSRAM, not cache */
-    __compiler_memory_barrier();
-    uint32_t rb = *p;
-    if (rb != 0xDEADBEEFu) {
-        char msg[72];
-        int n = snprintf(msg, sizeof(msg),
-            "[psram] XIP sanity FAIL: wrote 0xDEADBEEF read 0x%08lx\r\n",
-            (unsigned long)rb);
-        if (n > 0) rp2350_platform_write(msg, (size_t)n);
-        return false;
+    /* 7. Sanity check multiple regions of the 8 MB window. */
+    {
+        static const uint32_t k_offsets[] = {
+            0u, (2u * 1024u * 1024u), (4u * 1024u * 1024u), (6u * 1024u * 1024u)
+        };
+        static const uint32_t k_patterns[] = {
+            0xDEADBEEFu, 0xA5A55A5Au, 0x01234567u, 0x89ABCDEFu
+        };
+        size_t i;
+        for (i = 0; i < sizeof(k_offsets) / sizeof(k_offsets[0]); i++) {
+            volatile uint32_t *p = (volatile uint32_t *)((uintptr_t)RP2350_PSRAM_BASE + k_offsets[i]);
+            *p = k_patterns[i];
+            __compiler_memory_barrier();
+            if (*p != k_patterns[i]) {
+                char msg[96];
+                int n = snprintf(msg, sizeof(msg),
+                    "[psram] XIP sanity FAIL @+0x%08lx wrote=0x%08lx read=0x%08lx\r\n",
+                    (unsigned long)k_offsets[i],
+                    (unsigned long)k_patterns[i],
+                    (unsigned long)(*p));
+                if (n > 0) rp2350_platform_write(msg, (size_t)n);
+                return false;
+            }
+        }
     }
     rp2350_platform_write("[psram] XIP OK\r\n",
                           sizeof("[psram] XIP OK\r\n") - 1);
@@ -310,13 +271,7 @@ bool rp2350_psram_init(uint cs_gpio)
     return true;
 }
 
-bool rp2350_psram_install_zend_mm(void)
+bool rp2350_psram_is_ready(void)
 {
-    (void)s_psram_ready;
-    /* Disabled for now: switching AG(mm_heap) after zend_startup() causes
-     * mixed-heap lifetime corruption. Keep PSRAM init only; revisit with a
-     * clean pre-startup allocator integration path. */
-    rp2350_platform_write("[psram] Zend MM handoff skipped\r\n",
-                          sizeof("[psram] Zend MM handoff skipped\r\n") - 1);
-    return true;
+    return s_psram_ready;
 }

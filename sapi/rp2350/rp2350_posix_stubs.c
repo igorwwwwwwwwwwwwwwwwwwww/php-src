@@ -7,13 +7,7 @@
 
 char *getenv(const char *name)
 {
-	static char use_zend_alloc[] = "0";
-
-	/* Force bootstrap away from default Zend 2MB SRAM heap creation.
-	 * We switch to PSRAM-backed Zend MM after zend_startup(). */
-	if (name && strcmp(name, "USE_ZEND_ALLOC") == 0) {
-		return use_zend_alloc;
-	}
+	(void) name;
 
 	return NULL;
 }

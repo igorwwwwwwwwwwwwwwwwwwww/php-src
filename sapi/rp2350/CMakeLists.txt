@@ -6,6 +6,7 @@ set(PICO_PLATFORM "rp2350" CACHE STRING "Pico platform")
 set(PICO_DEFAULT_UART "0" CACHE STRING "Default UART instance for stdio")
 set(PICO_DEFAULT_UART_TX_PIN "4" CACHE STRING "Default UART TX pin for stdio")
 set(PICO_DEFAULT_UART_RX_PIN "5" CACHE STRING "Default UART RX pin for stdio")
+set(RP2350_WAIT_FOR_USB_SERIAL_MS "0" CACHE STRING "Wait up to this many milliseconds for USB CDC serial connection before boot logs (0 disables)")
 
 if(NOT DEFINED PICO_SDK_PATH)
   set(PICO_SDK_PATH "${CMAKE_CURRENT_LIST_DIR}/third_party/pico-sdk")
@@ -67,11 +68,13 @@ list(REMOVE_ITEM ZEND_ENGINE_SOURCES
 
 add_executable(php_mcu_firmware
   src/main.c
+  src/fault_handlers.c
   rp2350_eval_zend.c
   rp2350_psram.c
   rp2350_zend_fibers_stub.c
   rp2350_zend_optimizer_stub.c
   rp2350_posix_stubs.c
+  rp2350_mmap.c
   rp2350_transport_pico.c
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
@@ -90,6 +93,7 @@ target_include_directories(php_mcu_firmware PRIVATE
 target_compile_definitions(php_mcu_firmware PRIVATE
   ZEND_ENABLE_STATIC_TSRMLS_CACHE=1
   ZEND_EMBEDDED_NO_PHP_HEADERS=1
+  RP2350_WAIT_FOR_USB_SERIAL_MS=${RP2350_WAIT_FOR_USB_SERIAL_MS}
   # Give pico-sdk's newlib heap enough room for USB TinyUSB init, alarm pools,
   # mutexes etc.  The default 2 KB is too small when the full Zend BSS is present.
   PICO_HEAP_SIZE=65536

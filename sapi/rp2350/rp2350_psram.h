@@ -12,13 +12,10 @@
 #define RP2350_PSRAM_SIZE   (8u * 1024u * 1024u)   /* 8 MB on Badger 2350 */
 
 /*
- * Initialise PSRAM and install it as the Zend MM backing store.
- *
- * Must be called after stdio_init_all() and before rp2350_eval_execute().
- * Returns true on success, false if the chip does not respond or Zend MM
- * registration fails.
+ * Initialise PSRAM QPI/XIP mapping (CS1 @ 0x11000000).
+ * Must be called before code depends on PSRAM-backed subsystems.
  */
 bool rp2350_psram_init(uint cs_gpio);
-bool rp2350_psram_install_zend_mm(void);
+bool rp2350_psram_is_ready(void);
 
 #endif /* RP2350_PSRAM_H */
