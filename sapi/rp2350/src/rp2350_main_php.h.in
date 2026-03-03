@@ -1,0 +1,9 @@
+#ifndef RP2350_MAIN_PHP_H
+#define RP2350_MAIN_PHP_H
+
+static const char rp2350_main_php_source[] =
+"@RP2350_MAIN_PHP_ESC@";
+
+static const size_t rp2350_main_php_source_len = sizeof(rp2350_main_php_source) - 1;
+
+#endif /* RP2350_MAIN_PHP_H */
