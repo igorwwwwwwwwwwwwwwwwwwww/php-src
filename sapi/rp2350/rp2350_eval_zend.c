@@ -22,6 +22,7 @@
 #include "Zend/zend_stream.h"
 
 #include "rp2350_eval.h"
+#include "rp2350_epd.h"
 #include "rp2350_psram.h"
 #include "rp2350_transport.h"
 #include "rp2350_vfs.h"
@@ -106,6 +107,7 @@ ZEND_FUNCTION(time);
 ZEND_FUNCTION(microtime);
 ZEND_FUNCTION(hrtime);
 ZEND_FUNCTION(sleep);
+ZEND_FUNCTION(mcu_epd_fill);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep_ms, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, ms, IS_LONG, 0)
@@ -130,6 +132,10 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_sleep_mcu, 0, 1, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, seconds, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_fill, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, black, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
 	ZEND_FE(file_get_contents, arginfo_file_get_contents_mcu)
@@ -137,6 +143,7 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(microtime, arginfo_microtime_mcu)
 	ZEND_FE(hrtime, arginfo_hrtime_mcu)
 	ZEND_FE(sleep, arginfo_sleep_mcu)
+	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
 	ZEND_FE_END
 };
 
@@ -236,6 +243,17 @@ ZEND_FUNCTION(sleep)
 		sleep_ms((uint32_t)(seconds * 1000));
 	}
 	RETURN_LONG(0);
+}
+
+ZEND_FUNCTION(mcu_epd_fill)
+{
+	bool black = false;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_BOOL(black)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_epd_fill(black));
 }
 
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)

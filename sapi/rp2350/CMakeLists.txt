@@ -71,6 +71,7 @@ add_executable(php_mcu_firmware
   src/fault_handlers.c
   src/rp2350_vfs_syscalls.c
   rp2350_rtc.c
+  rp2350_epd.c
   src/php_runtime_stubs.c
   rp2350_eval_zend.c
   rp2350_psram.c
@@ -117,6 +118,7 @@ target_link_libraries(php_mcu_firmware
   pico_stdlib
   hardware_gpio
   hardware_i2c
+  hardware_spi
   hardware_xip_cache
 )
 
