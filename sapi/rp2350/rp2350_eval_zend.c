@@ -111,6 +111,7 @@ ZEND_FUNCTION(mcu_epd_fill);
 ZEND_FUNCTION(mcu_epd_clear);
 ZEND_FUNCTION(mcu_epd_set_pixel);
 ZEND_FUNCTION(mcu_epd_update);
+ZEND_FUNCTION(mcu_epd_render);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep_ms, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, ms, IS_LONG, 0)
@@ -152,6 +153,14 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_update, 0, 0, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_render, 0, 3, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, bytes, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, width, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, height, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 1)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 1)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
 	ZEND_FE(file_get_contents, arginfo_file_get_contents_mcu)
@@ -163,6 +172,7 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
 	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
 	ZEND_FE(mcu_epd_update, arginfo_mcu_epd_update)
+	ZEND_FE(mcu_epd_render, arginfo_mcu_epd_render)
 	ZEND_FE_END
 };
 
@@ -304,6 +314,42 @@ ZEND_FUNCTION(mcu_epd_set_pixel)
 ZEND_FUNCTION(mcu_epd_update)
 {
 	ZEND_PARSE_PARAMETERS_NONE();
+	RETURN_BOOL(rp2350_epd_update());
+}
+
+ZEND_FUNCTION(mcu_epd_render)
+{
+	char *bytes = NULL;
+	size_t bytes_len = 0;
+	zend_long width = 0;
+	zend_long height = 0;
+	zend_long x = -1;
+	zend_long y = -1;
+	int draw_x;
+	int draw_y;
+
+	ZEND_PARSE_PARAMETERS_START(3, 5)
+		Z_PARAM_STRING(bytes, bytes_len)
+		Z_PARAM_LONG(width)
+		Z_PARAM_LONG(height)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (width <= 0 || height <= 0) {
+		RETURN_FALSE;
+	}
+
+	draw_x = (x >= 0) ? (int)x : (264 - (int)width) / 2;
+	draw_y = (y >= 0) ? (int)y : (176 - (int)height) / 2;
+
+	if (!rp2350_epd_clear(false)) {
+		RETURN_FALSE;
+	}
+	if (!rp2350_epd_render_1bpp((const uint8_t *)bytes, bytes_len, (int)width, (int)height, draw_x, draw_y)) {
+		RETURN_FALSE;
+	}
 	RETURN_BOOL(rp2350_epd_update());
 }
 

@@ -71,7 +71,8 @@ add_executable(php_mcu_firmware
   src/fault_handlers.c
   src/rp2350_vfs_syscalls.c
   rp2350_rtc.c
-  rp2350_epd.c
+  rp2350_epd.cpp
+  third_party/ssd1680/ssd1680.cpp
   src/php_runtime_stubs.c
   rp2350_eval_zend.c
   rp2350_psram.c
