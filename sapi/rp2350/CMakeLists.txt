@@ -27,10 +27,11 @@ pico_sdk_init()
 set(PHP_SRC_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
 set(RP2350_VFS_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/rp2350_vfs.h")
 set(RP2350_VFS_FILES "${CMAKE_CURRENT_LIST_DIR}/main.php")
-file(GLOB RP2350_VFS_EXTRA_FILES "${CMAKE_CURRENT_LIST_DIR}/fs/*")
+file(GLOB RP2350_VFS_EXTRA_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/fs/*")
 list(APPEND RP2350_VFS_FILES ${RP2350_VFS_EXTRA_FILES})
 list(SORT RP2350_VFS_FILES)
 list(REMOVE_DUPLICATES RP2350_VFS_FILES)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${RP2350_VFS_FILES})
 
 set(RP2350_VFS_TEXT
 "#ifndef RP2350_VFS_H\n#define RP2350_VFS_H\n\n#include <stddef.h>\n\ntypedef struct {\n  const char *path;\n  const char *source;\n  size_t len;\n} rp2350_vfs_file_t;\n\n")
