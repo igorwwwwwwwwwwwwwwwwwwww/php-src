@@ -108,6 +108,9 @@ ZEND_FUNCTION(microtime);
 ZEND_FUNCTION(hrtime);
 ZEND_FUNCTION(sleep);
 ZEND_FUNCTION(mcu_epd_fill);
+ZEND_FUNCTION(mcu_epd_clear);
+ZEND_FUNCTION(mcu_epd_set_pixel);
+ZEND_FUNCTION(mcu_epd_update);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep_ms, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, ms, IS_LONG, 0)
@@ -136,6 +139,19 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_fill, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, black, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_clear, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, black, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_set_pixel, 0, 3, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, black, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_update, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
 	ZEND_FE(file_get_contents, arginfo_file_get_contents_mcu)
@@ -144,6 +160,9 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(hrtime, arginfo_hrtime_mcu)
 	ZEND_FE(sleep, arginfo_sleep_mcu)
 	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
+	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
+	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
+	ZEND_FE(mcu_epd_update, arginfo_mcu_epd_update)
 	ZEND_FE_END
 };
 
@@ -254,6 +273,38 @@ ZEND_FUNCTION(mcu_epd_fill)
 	ZEND_PARSE_PARAMETERS_END();
 
 	RETURN_BOOL(rp2350_epd_fill(black));
+}
+
+ZEND_FUNCTION(mcu_epd_clear)
+{
+	bool black = false;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_BOOL(black)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_epd_clear(black));
+}
+
+ZEND_FUNCTION(mcu_epd_set_pixel)
+{
+	zend_long x = 0;
+	zend_long y = 0;
+	bool black = false;
+
+	ZEND_PARSE_PARAMETERS_START(3, 3)
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+		Z_PARAM_BOOL(black)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_epd_set_pixel((int)x, (int)y, black));
+}
+
+ZEND_FUNCTION(mcu_epd_update)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	RETURN_BOOL(rp2350_epd_update());
 }
 
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)

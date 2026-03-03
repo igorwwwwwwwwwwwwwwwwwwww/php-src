@@ -49,6 +49,7 @@ static const uint8_t EPD_Y_END_L = 0x00;
 
 static bool s_epd_inited = false;
 static uint8_t s_tx_buf[EPD_RAM_BYTES];
+static uint8_t s_framebuffer[EPD_RAM_BYTES];
 
 static inline bool epd_is_busy(void)
 {
@@ -184,23 +185,55 @@ bool rp2350_epd_init(void)
 
 	epd_setup();
 	epd_write_luts();
+	memset(s_framebuffer, 0x00, sizeof(s_framebuffer));
 	s_epd_inited = true;
 	return true;
 }
 
-bool rp2350_epd_fill(bool black)
+bool rp2350_epd_clear(bool black)
 {
-	const uint8_t fill = black ? 0xFF : 0x00;
+	if (!rp2350_epd_init()) {
+		return false;
+	}
+	memset(s_framebuffer, black ? 0xFF : 0x00, sizeof(s_framebuffer));
+	return true;
+}
+
+bool rp2350_epd_set_pixel(int x, int y, bool black)
+{
+	size_t idx;
+	uint8_t bit;
+
+	if (!rp2350_epd_init()) {
+		return false;
+	}
+	if (x < 0 || x >= EPD_WIDTH || y < 0 || y >= EPD_HEIGHT) {
+		return false;
+	}
+
+	idx = (size_t)(y + (x * EPD_HEIGHT)) / 8u;
+	bit = (uint8_t)(1u << (7u - ((uint8_t)y & 0x07u)));
+
+	if (black) {
+		s_framebuffer[idx] |= bit;
+	} else {
+		s_framebuffer[idx] &= (uint8_t)~bit;
+	}
+	return true;
+}
+
+bool rp2350_epd_update(void)
+{
 	const uint8_t duc2[1] = {0xC7};
 
 	if (!rp2350_epd_init()) {
 		return false;
 	}
 
-	memset(s_tx_buf, fill, sizeof(s_tx_buf));
 	epd_busy_wait();
 	epd_write_luts();
 
+	memcpy(s_tx_buf, s_framebuffer, sizeof(s_tx_buf));
 	epd_set_ram_counters();
 	epd_command(EPD_WRAM_R, NULL, 0);
 	epd_data(s_tx_buf, sizeof(s_tx_buf));
@@ -215,4 +248,9 @@ bool rp2350_epd_fill(bool black)
 	epd_command(EPD_ADUS, NULL, 0);
 	epd_busy_wait();
 	return true;
+}
+
+bool rp2350_epd_fill(bool black)
+{
+	return rp2350_epd_clear(black) && rp2350_epd_update();
 }
