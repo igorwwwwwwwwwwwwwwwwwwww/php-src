@@ -9,6 +9,7 @@
 
 #include "rp2350_eval.h"
 #include "rp2350_psram.h"
+#include "rp2350_rtc.h"
 #include "rp2350_transport.h"
 
 static void log_line(const char *line)
@@ -55,6 +56,11 @@ int main(void)
 
 	log_line("\r\n[boot] php-mcu\r\n");
 	log_line("[boot] psram init OK\r\n");
+	if (rp2350_rtc_sync_system_time()) {
+		log_line("[boot] rtc sync OK\r\n");
+	} else {
+		log_line("[boot] rtc sync FAIL\r\n");
+	}
 
 	if (rp2350_eval_startup() != 0) {
 		char line[160];

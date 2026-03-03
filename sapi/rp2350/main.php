@@ -10,6 +10,20 @@ while (true) {
         print strlen($lib);
         print "\n";
     }
+    print "time:";
+    print time();
+    print " microtime_s:";
+    print microtime();
+    print " microtime_f:";
+    print microtime(true);
+    $hrt = hrtime();
+    print " hrtime_a:";
+    print $hrt[0];
+    print ".";
+    print $hrt[1];
+    print " hrtime_n:";
+    print hrtime(true);
+    print "\n";
     print tick_line();
-    mcu_sleep_ms(1000);
+    sleep(1);
 }

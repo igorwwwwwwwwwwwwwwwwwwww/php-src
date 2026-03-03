@@ -5,8 +5,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <time.h>
+#include <sys/time.h>
 
 #include "pico/stdlib.h"
+#include "pico/time.h"
 
 #include "Zend/zend.h"
 #include "Zend/zend_API.h"
@@ -99,6 +102,10 @@ static void rp2350_vfs_closer(void *handle)
 
 ZEND_FUNCTION(mcu_sleep_ms);
 ZEND_FUNCTION(file_get_contents);
+ZEND_FUNCTION(time);
+ZEND_FUNCTION(microtime);
+ZEND_FUNCTION(hrtime);
+ZEND_FUNCTION(sleep);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep_ms, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, ms, IS_LONG, 0)
@@ -108,9 +115,28 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_file_get_contents_mcu, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_time_mcu, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_microtime_mcu, 0, 0, MAY_BE_STRING|MAY_BE_DOUBLE)
+	ZEND_ARG_TYPE_INFO(0, as_float, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_hrtime_mcu, 0, 0, MAY_BE_ARRAY|MAY_BE_LONG|MAY_BE_DOUBLE|MAY_BE_FALSE)
+	ZEND_ARG_TYPE_INFO(0, as_number, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_sleep_mcu, 0, 1, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, seconds, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
 	ZEND_FE(file_get_contents, arginfo_file_get_contents_mcu)
+	ZEND_FE(time, arginfo_time_mcu)
+	ZEND_FE(microtime, arginfo_microtime_mcu)
+	ZEND_FE(hrtime, arginfo_hrtime_mcu)
+	ZEND_FE(sleep, arginfo_sleep_mcu)
 	ZEND_FE_END
 };
 
@@ -127,6 +153,89 @@ ZEND_FUNCTION(mcu_sleep_ms)
 	}
 	sleep_ms((uint32_t) ms);
 	RETURN_TRUE;
+}
+
+ZEND_FUNCTION(time)
+{
+	time_t now;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+
+	now = time(NULL);
+	RETURN_LONG((zend_long)now);
+}
+
+ZEND_FUNCTION(microtime)
+{
+	bool as_float = false;
+	struct timeval tv;
+	double value;
+	char out[48];
+	int n;
+
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_BOOL(as_float)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (gettimeofday(&tv, NULL) != 0) {
+		tv.tv_sec = 0;
+		tv.tv_usec = 0;
+	}
+
+	if (as_float) {
+		value = (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0);
+		RETURN_DOUBLE(value);
+	}
+
+	n = snprintf(out, sizeof(out), "0.%06ld %ld", (long)tv.tv_usec, (long)tv.tv_sec);
+	if (n < 0) {
+		RETURN_STRING("0.000000 0");
+	}
+	RETURN_STRINGL(out, (size_t)n);
+}
+
+ZEND_FUNCTION(hrtime)
+{
+	bool as_number = false;
+	uint64_t total_ns;
+	uint64_t sec;
+	uint64_t nsec;
+
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_BOOL(as_number)
+	ZEND_PARSE_PARAMETERS_END();
+
+	total_ns = to_us_since_boot(get_absolute_time()) * 1000ull;
+	sec = total_ns / 1000000000ull;
+	nsec = total_ns % 1000000000ull;
+
+	if (as_number) {
+#if SIZEOF_ZEND_LONG >= 8
+		RETURN_LONG((zend_long)total_ns);
+#else
+		RETURN_DOUBLE((double)total_ns);
+#endif
+	}
+
+	array_init(return_value);
+	add_next_index_long(return_value, (zend_long)sec);
+	add_next_index_long(return_value, (zend_long)nsec);
+}
+
+ZEND_FUNCTION(sleep)
+{
+	zend_long seconds = 0;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(seconds)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (seconds > 0) {
+		sleep_ms((uint32_t)(seconds * 1000));
+	}
+	RETURN_LONG(0);
 }
 
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)
@@ -396,6 +505,8 @@ int rp2350_eval_startup(void)
 	zend_observer_class_linked_observed = false;
 
 	zend_activate();
+	/* We don't run full php_module_startup INI defaults yet; set sane float precision. */
+	EG(precision) = 14;
 	rp2350_zend_started = true;
 	rp2350_eval_error = "ok";
 	return 0;
