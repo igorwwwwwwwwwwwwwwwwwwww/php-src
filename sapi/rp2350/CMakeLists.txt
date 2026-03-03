@@ -99,7 +99,11 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/streams/plain_wrapper.c
   ${PHP_SRC_ROOT}/main/streams/streams.c
   ${PHP_SRC_ROOT}/main/streams/userspace.c
+  ${PHP_SRC_ROOT}/main/SAPI.c
+  ${PHP_SRC_ROOT}/main/main.c
+  ${PHP_SRC_ROOT}/main/php_variables.c
   ${PHP_SRC_ROOT}/main/fopen_wrappers.c
+  ${PHP_SRC_ROOT}/main/strlcat.c
   ${PHP_SRC_ROOT}/main/snprintf.c
   ${PHP_SRC_ROOT}/main/spprintf.c
   ${PHP_SRC_ROOT}/main/strlcpy.c
@@ -123,6 +127,8 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   ZEND_ENABLE_STATIC_TSRMLS_CACHE=1
   ZEND_EMBEDDED_NO_PHP_HEADERS=1
   RP2350_WAIT_FOR_USB_SERIAL_MS=${RP2350_WAIT_FOR_USB_SERIAL_MS}
+  HAVE_INT32_T=1
+  HAVE_UINT32_T=1
   # Give pico-sdk's newlib heap enough room for USB TinyUSB init, alarm pools,
   # mutexes etc.  The default 2 KB is too small when the full Zend BSS is present.
   PICO_HEAP_SIZE=65536

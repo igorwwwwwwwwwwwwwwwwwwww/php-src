@@ -13,4 +13,17 @@ int symlink(const char *target, const char *linkpath);
 int link(const char *oldpath, const char *newpath);
 int utime(const char *filename, const struct utimbuf *times);
 
+#ifndef LOG_ERR
+#define LOG_ERR 3
+#endif
+#ifndef LOG_WARNING
+#define LOG_WARNING 4
+#endif
+#ifndef LOG_NOTICE
+#define LOG_NOTICE 5
+#endif
+#ifndef LOG_INFO
+#define LOG_INFO 6
+#endif
+
 #endif /* RP2350_POSIX_COMPAT_H */

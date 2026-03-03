@@ -89,6 +89,12 @@ int chmod(const char *path, mode_t mode)
 	return -1;
 }
 
+int chdir(const char *path)
+{
+	(void)path;
+	return 0;
+}
+
 int chown(const char *path, uid_t owner, gid_t group)
 {
 	(void) path;

@@ -21,7 +21,10 @@
 #include "Zend/zend_smart_string.h"
 #include "Zend/zend_stream.h"
 
+#include "SAPI.h"
+#include "main/php_main.h"
 #include "main/php_globals.h"
+#include "main/php_variables.h"
 #include "ext/standard/file.h"
 
 #include "rp2350_eval.h"
@@ -31,6 +34,7 @@
 #include "rp2350_vfs.h"
 
 static bool rp2350_zend_started = false;
+static bool rp2350_sapi_started = false;
 static const char *rp2350_eval_error = "ok";
 static char rp2350_eval_error_detail[256];
 static char rp2350_last_zend_error[192];
@@ -532,6 +536,121 @@ static void rp2350_zend_timeout(int seconds)
 	(void) seconds;
 }
 
+static int rp2350_sapi_startup(sapi_module_struct *sapi_module)
+{
+	return php_module_startup(sapi_module, NULL);
+}
+
+static size_t rp2350_sapi_ub_write(const char *str, size_t str_length)
+{
+	return rp2350_platform_write(str, str_length);
+}
+
+static void rp2350_sapi_flush(void *server_context)
+{
+	(void) server_context;
+	rp2350_platform_flush();
+}
+
+static size_t rp2350_sapi_read_post(char *buffer, size_t count_bytes)
+{
+	(void)buffer;
+	(void)count_bytes;
+	return 0;
+}
+
+static void rp2350_sapi_treat_data(int arg, char *str, zval *destArray)
+{
+	(void)str;
+	if (destArray) {
+		array_init(destArray);
+		return;
+	}
+
+	switch (arg) {
+		case PARSE_GET:
+			zval_ptr_dtor_nogc(&PG(http_globals)[TRACK_VARS_GET]);
+			array_init(&PG(http_globals)[TRACK_VARS_GET]);
+			break;
+		case PARSE_POST:
+			zval_ptr_dtor_nogc(&PG(http_globals)[TRACK_VARS_POST]);
+			array_init(&PG(http_globals)[TRACK_VARS_POST]);
+			break;
+		case PARSE_COOKIE:
+			zval_ptr_dtor_nogc(&PG(http_globals)[TRACK_VARS_COOKIE]);
+			array_init(&PG(http_globals)[TRACK_VARS_COOKIE]);
+			break;
+		default:
+			break;
+	}
+}
+
+static char *rp2350_sapi_read_cookies(void)
+{
+	return NULL;
+}
+
+static void rp2350_sapi_log_message(const char *message, int syslog_type_int)
+{
+	(void) syslog_type_int;
+	if (message) {
+		rp2350_platform_write("[php] ", sizeof("[php] ") - 1);
+		rp2350_platform_write(message, strlen(message));
+		rp2350_platform_write("\r\n", 2);
+	}
+}
+
+static void rp2350_sapi_register_variables(zval *track_vars_array)
+{
+	php_import_environment_variables(track_vars_array);
+}
+
+static int rp2350_sapi_deactivate(void)
+{
+	rp2350_platform_flush();
+	return SUCCESS;
+}
+
+static sapi_module_struct rp2350_sapi_module = {
+	"rp2350",
+	"RP2350 Embedded SAPI",
+	rp2350_sapi_startup,
+	php_module_shutdown_wrapper,
+	NULL,
+	rp2350_sapi_deactivate,
+	rp2350_sapi_ub_write,
+	rp2350_sapi_flush,
+	NULL,
+	NULL,
+	php_error,
+	NULL,
+	NULL,
+	NULL,
+	rp2350_sapi_read_post,
+	rp2350_sapi_read_cookies,
+	rp2350_sapi_register_variables,
+	rp2350_sapi_log_message,
+	NULL,
+	NULL,
+	NULL, /* php_ini_path_override */
+	NULL, /* default_post_reader */
+	rp2350_sapi_treat_data,
+	NULL, /* executable_location */
+	0, /* php_ini_ignore */
+	0, /* php_ini_ignore_cwd */
+	NULL, /* get_fd */
+	NULL, /* force_http_10 */
+	NULL, /* get_target_uid */
+	NULL, /* get_target_gid */
+	NULL, /* input_filter */
+	NULL, /* ini_defaults */
+	0, /* phpinfo_as_text */
+	NULL, /* ini_entries */
+	NULL, /* additional_functions */
+	NULL, /* input_filter_init */
+	NULL  /* pre_request_init */
+};
+
 static zend_result rp2350_zend_stream_open(zend_file_handle *handle)
 {
 	char path[192];
@@ -707,69 +826,35 @@ static void rp2350_zend_random_bytes_insecure(zend_random_bytes_insecure_state *
 	(void) rp2350_zend_random_bytes(bytes, size, NULL, 0);
 }
 
+static int rp2350_register_request_functions(void)
+{
+	if (zend_register_functions(NULL, rp2350_mcu_functions, NULL, MODULE_TEMPORARY) == FAILURE) {
+		rp2350_eval_error = "zend_register_functions failed";
+		return -1;
+	}
+	return 0;
+}
+
 int rp2350_eval_startup(void)
 {
-	zend_utility_functions zuf = {0};
-
 	if (rp2350_zend_started) {
 		rp2350_eval_error = "ok";
 		return 0;
 	}
 
-	zuf.error_function = rp2350_zend_error_cb;
-	zuf.printf_function = rp2350_zend_printf;
-	zuf.write_function = rp2350_zend_write;
-	zuf.fopen_function = rp2350_zend_fopen;
-	zuf.message_handler = rp2350_zend_message_handler;
-	zuf.get_configuration_directive = rp2350_zend_get_configuration_directive;
-	zuf.ticks_function = rp2350_zend_ticks;
-	zuf.on_timeout = rp2350_zend_timeout;
-	zuf.stream_open_function = rp2350_zend_stream_open;
-	zuf.printf_to_smart_string_function = php_printf_to_smart_string;
-	zuf.printf_to_smart_str_function = php_printf_to_smart_str;
-	zuf.getenv_function = rp2350_zend_getenv;
-	zuf.resolve_path_function = rp2350_zend_resolve_path;
-	zuf.random_bytes_function = rp2350_zend_random_bytes;
-	zuf.random_bytes_insecure_function = rp2350_zend_random_bytes_insecure;
-
-	zend_startup(&zuf);
-
-	/* Run internal module MINITs (Core, etc), which registers exception classes. */
-	zend_startup_modules();
-	zend_collect_module_handlers();
-	if (zend_ce_exception == NULL || zend_ce_error == NULL) {
-		rp2350_platform_write("[zend] core classes missing after zend_startup_modules\r\n",
-			sizeof("[zend] core classes missing after zend_startup_modules\r\n") - 1);
-		rp2350_eval_error = "missing core classes after zend_startup_modules";
-		return -1;
+	if (!rp2350_sapi_started) {
+		sapi_startup(&rp2350_sapi_module);
+		SG(server_context) = NULL;
+		SG(options) |= SAPI_OPTION_NO_CHDIR;
+		SG(headers_sent) = 1;
+		SG(request_info).no_headers = 1;
+		rp2350_sapi_started = true;
 	}
-	if (zend_register_functions(NULL, rp2350_mcu_functions, NULL, MODULE_PERSISTENT) == FAILURE) {
-		rp2350_eval_error = "zend_register_functions failed";
-		return -1;
-	}
-	if (zend_post_startup() == FAILURE) {
-		rp2350_eval_error = "zend_post_startup failed";
-		return -1;
-	}
-	if (zend_ce_exception == NULL || zend_ce_error == NULL) {
-		rp2350_platform_write("[zend] core classes missing after zend_post_startup\r\n",
-			sizeof("[zend] core classes missing after zend_post_startup\r\n") - 1);
-		rp2350_eval_error = "missing core classes after zend_post_startup";
+	if (rp2350_sapi_module.startup(&rp2350_sapi_module) == FAILURE) {
+		rp2350_eval_error = "php_module_startup failed";
 		return -1;
 	}
 
-	/* Disable observer machinery for MCU bring-up stability. */
-	zend_observer_fcall_op_array_extension = -1;
-	zend_observer_fcall_internal_function_extension = -1;
-	zend_observer_errors_observed = false;
-	zend_observer_function_declared_observed = false;
-	zend_observer_class_linked_observed = false;
-
-	zend_activate();
-	/* We don't run full php_module_startup INI defaults yet; set sane float precision. */
-	EG(precision) = 14;
-	/* Ensure stream allocation uses a non-zero chunk size (needed for fopen/fread/fgetc paths). */
-	FG(def_chunk_size) = 8192;
 	rp2350_zend_started = true;
 	rp2350_eval_error = "ok";
 	return 0;
@@ -816,16 +901,31 @@ int rp2350_eval_execute_file(const char *path)
 		return -1;
 	}
 
+	if (php_request_startup() == FAILURE) {
+		rp2350_eval_error = "php_request_startup failed";
+		return -1;
+	}
+	/* Our minimal config stubs don't seed this; zero leads to fread/fgetc zero-byte reads. */
+	FG(def_chunk_size) = 8192;
+	SG(headers_sent) = 1;
+	SG(request_info).no_headers = 1;
+	if (rp2350_register_request_functions() != 0) {
+		php_request_shutdown(NULL);
+		return -1;
+	}
+
 	zend_stream_init_filename(&file_handle, path);
-	if (zend_execute_script(ZEND_REQUIRE_ONCE, NULL, &file_handle) == FAILURE) {
+	if (php_execute_script(&file_handle) == FAILURE) {
 		rp2350_log_execute_failure(path);
 		if (EG(exception)) {
 			(void)zend_exception_error(EG(exception), E_WARNING);
 			zend_clear_exception();
-		} else {
 		}
+		php_request_shutdown(NULL);
 		return -1;
 	}
+
+	php_request_shutdown(NULL);
 	rp2350_eval_error = "ok";
 	return 0;
 }
