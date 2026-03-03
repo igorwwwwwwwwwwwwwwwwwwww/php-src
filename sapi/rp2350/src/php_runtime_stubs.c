@@ -115,17 +115,13 @@ PHP_INI_MH(OnChangeBrowscap)
 	return SUCCESS;
 }
 
+SAPI_POST_HANDLER_FUNC(rfc1867_post_handler)
+{
+	(void)content_type_dup;
+	(void)arg;
+}
+
 PHPAPI int php_register_internal_extensions(void)
-{
-	return SUCCESS;
-}
-
-int php_setup_sapi_content_types(void)
-{
-	return SUCCESS;
-}
-
-int php_startup_sapi_content_types(void)
 {
 	return SUCCESS;
 }
@@ -208,11 +204,6 @@ PHPAPI zend_string *php_format_date(const char *format, size_t format_len, time_
 
 PHPAPI void php_call_shutdown_functions(void) {}
 PHPAPI void php_free_shutdown_functions(void) {}
-
-void php_startup_ticks(void) {}
-void php_deactivate_ticks(void) {}
-void php_shutdown_ticks(php_core_globals *core_globals) { (void)core_globals; }
-void php_run_ticks(int count) { (void)count; }
 
 PHPAPI void php_output_startup(void) {}
 PHPAPI void php_output_shutdown(void) {}
