@@ -253,6 +253,19 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE_END
 };
 
+static zend_module_entry rp2350_mcu_module_entry = {
+	STANDARD_MODULE_HEADER,
+	"rp2350_mcu",
+	rp2350_mcu_functions,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NO_VERSION_YET,
+	STANDARD_MODULE_PROPERTIES
+};
+
 ZEND_FUNCTION(mcu_sleep_ms)
 {
 	zend_long ms = 0;
@@ -826,15 +839,6 @@ static void rp2350_zend_random_bytes_insecure(zend_random_bytes_insecure_state *
 	(void) rp2350_zend_random_bytes(bytes, size, NULL, 0);
 }
 
-static int rp2350_register_request_functions(void)
-{
-	if (zend_register_functions(NULL, rp2350_mcu_functions, NULL, MODULE_TEMPORARY) == FAILURE) {
-		rp2350_eval_error = "zend_register_functions failed";
-		return -1;
-	}
-	return 0;
-}
-
 int rp2350_eval_startup(void)
 {
 	if (rp2350_zend_started) {
@@ -850,7 +854,7 @@ int rp2350_eval_startup(void)
 		SG(request_info).no_headers = 1;
 		rp2350_sapi_started = true;
 	}
-	if (rp2350_sapi_module.startup(&rp2350_sapi_module) == FAILURE) {
+	if (php_module_startup(&rp2350_sapi_module, &rp2350_mcu_module_entry) == FAILURE) {
 		rp2350_eval_error = "php_module_startup failed";
 		return -1;
 	}
@@ -909,10 +913,6 @@ int rp2350_eval_execute_file(const char *path)
 	FG(def_chunk_size) = 8192;
 	SG(headers_sent) = 1;
 	SG(request_info).no_headers = 1;
-	if (rp2350_register_request_functions() != 0) {
-		php_request_shutdown(NULL);
-		return -1;
-	}
 
 	zend_stream_init_filename(&file_handle, path);
 	if (php_execute_script(&file_handle) == FAILURE) {
