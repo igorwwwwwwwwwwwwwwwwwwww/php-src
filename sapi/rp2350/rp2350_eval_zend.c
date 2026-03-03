@@ -21,6 +21,9 @@
 #include "Zend/zend_smart_string.h"
 #include "Zend/zend_stream.h"
 
+#include "main/php_globals.h"
+#include "ext/standard/file.h"
+
 #include "rp2350_eval.h"
 #include "rp2350_epd.h"
 #include "rp2350_psram.h"
@@ -112,6 +115,10 @@ static void rp2350_vfs_closer(void *handle)
 
 ZEND_FUNCTION(mcu_sleep_ms);
 ZEND_FUNCTION(file_get_contents);
+ZEND_FUNCTION(fopen);
+ZEND_FUNCTION(fgetc);
+ZEND_FUNCTION(fclose);
+ZEND_FUNCTION(fread);
 ZEND_FUNCTION(time);
 ZEND_FUNCTION(microtime);
 ZEND_FUNCTION(hrtime);
@@ -133,6 +140,26 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_file_get_contents_mcu, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_fopen_mcu, 0, 0, 2)
+	ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, mode, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, use_include_path, _IS_BOOL, 1)
+	ZEND_ARG_INFO(0, context)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_fgetc_mcu, 0, 0, 1)
+	ZEND_ARG_INFO(0, stream)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_fclose_mcu, 0, 0, 1)
+	ZEND_ARG_INFO(0, stream)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_fread_mcu, 0, 0, 2)
+	ZEND_ARG_INFO(0, stream)
+	ZEND_ARG_TYPE_INFO(0, length, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_time_mcu, 0, 0, IS_LONG, 0)
@@ -201,6 +228,10 @@ ZEND_END_ARG_INFO()
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
 	ZEND_FE(file_get_contents, arginfo_file_get_contents_mcu)
+	ZEND_FE(fopen, arginfo_fopen_mcu)
+	ZEND_FE(fgetc, arginfo_fgetc_mcu)
+	ZEND_FE(fclose, arginfo_fclose_mcu)
+	ZEND_FE(fread, arginfo_fread_mcu)
 	ZEND_FE(time, arginfo_time_mcu)
 	ZEND_FE(microtime, arginfo_microtime_mcu)
 	ZEND_FE(hrtime, arginfo_hrtime_mcu)
@@ -547,35 +578,6 @@ static zend_result rp2350_zend_stream_open(zend_file_handle *handle)
 
 static void rp2350_log_execute_failure(const char *path)
 {
-	char line[320];
-	zend_string *compiled_file = zend_get_compiled_filename();
-	uint32_t compiled_line = zend_get_compiled_lineno();
-	zend_string *exec_file_now = zend_get_executed_filename_ex();
-	uint32_t exec_line_now = zend_get_executed_lineno();
-	int in_compilation = CG(in_compilation) ? 1 : 0;
-	int unclean_shutdown = CG(unclean_shutdown) ? 1 : 0;
-	int bailout_set = EG(bailout) ? 1 : 0;
-
-	snprintf(line, sizeof(line), "[zend] execute_script failed path=%s\r\n", path ? path : "<null>");
-	rp2350_platform_write(line, strlen(line));
-	rp2350_platform_flush();
-	snprintf(
-		line,
-		sizeof(line),
-		"[zend] state: compiled=%s:%" PRIu32 " exec=%s:%" PRIu32 " in_comp=%d unclean=%d bailout=%d last_in=%s last_path=%s\r\n",
-		compiled_file ? ZSTR_VAL(compiled_file) : "<null>",
-		compiled_line,
-		exec_file_now ? ZSTR_VAL(exec_file_now) : "<null>",
-		exec_line_now,
-		in_compilation,
-		unclean_shutdown,
-		bailout_set,
-		rp2350_stream_open_last_in[0] ? rp2350_stream_open_last_in : "<none>",
-		rp2350_stream_open_last_path[0] ? rp2350_stream_open_last_path : "<none>"
-	);
-	rp2350_platform_write(line, strlen(line));
-	rp2350_platform_flush();
-
 	if (EG(exception)) {
 		zend_object *ex = EG(exception);
 		zval rv_msg;
@@ -589,20 +591,9 @@ static void rp2350_log_execute_failure(const char *path)
 		zend_long lineno = zline ? zval_get_long(zline) : 0;
 
 		snprintf(
-			line,
-			sizeof(line),
-			"[zend] ex=%s msg=%s file=%s line=%ld\r\n",
-			ex && ex->ce && ex->ce->name ? ZSTR_VAL(ex->ce->name) : "<unknown>",
-			smsg ? ZSTR_VAL(smsg) : "<null>",
-			sfile ? ZSTR_VAL(sfile) : "<null>",
-			(long)lineno
-		);
-		rp2350_platform_write(line, strlen(line));
-		rp2350_platform_flush();
-			snprintf(
-				rp2350_eval_error_detail,
-				sizeof(rp2350_eval_error_detail),
-				"execute exception: %s at %s:%ld",
+			rp2350_eval_error_detail,
+			sizeof(rp2350_eval_error_detail),
+			"execute exception: %s at %s:%ld",
 			smsg ? ZSTR_VAL(smsg) : "<null>",
 			sfile ? ZSTR_VAL(sfile) : "<null>",
 			(long)lineno
@@ -618,29 +609,20 @@ static void rp2350_log_execute_failure(const char *path)
 	} else {
 		zend_string *exec_file = zend_get_executed_filename_ex();
 		snprintf(
-			line,
-			sizeof(line),
-			"[zend] no exception; executed=%s:%u\r\n",
+			rp2350_eval_error_detail,
+			sizeof(rp2350_eval_error_detail),
+			"execute failure at %s:%u stream=%d reason=%s in=%s path=%s req=%s zend=%s",
 			exec_file ? ZSTR_VAL(exec_file) : "<null>",
-			(unsigned)zend_get_executed_lineno()
+			(unsigned)zend_get_executed_lineno(),
+			rp2350_stream_open_seen ? 1 : 0,
+			rp2350_stream_open_last_reason ? rp2350_stream_open_last_reason : "<null>",
+			rp2350_stream_open_last_in[0] ? rp2350_stream_open_last_in : "<none>",
+			rp2350_stream_open_last_path[0] ? rp2350_stream_open_last_path : "<none>",
+			path ? path : "<null>",
+			rp2350_last_zend_error[0] ? rp2350_last_zend_error : "<none>"
 		);
-		rp2350_platform_write(line, strlen(line));
-		rp2350_platform_flush();
-			snprintf(
-				rp2350_eval_error_detail,
-				sizeof(rp2350_eval_error_detail),
-				"execute failure at %s:%u stream=%d reason=%s in=%s path=%s req=%s zend=%s",
-				exec_file ? ZSTR_VAL(exec_file) : "<null>",
-				(unsigned)zend_get_executed_lineno(),
-				rp2350_stream_open_seen ? 1 : 0,
-				rp2350_stream_open_last_reason ? rp2350_stream_open_last_reason : "<null>",
-				rp2350_stream_open_last_in[0] ? rp2350_stream_open_last_in : "<none>",
-				rp2350_stream_open_last_path[0] ? rp2350_stream_open_last_path : "<none>",
-				path ? path : "<null>",
-				rp2350_last_zend_error[0] ? rp2350_last_zend_error : "<none>"
-			);
-			rp2350_eval_error = rp2350_eval_error_detail;
-		}
+		rp2350_eval_error = rp2350_eval_error_detail;
+	}
 }
 
 static void rp2350_zend_printf_to_smart_string(smart_string *buf, const char *format, va_list ap)
@@ -728,8 +710,6 @@ static void rp2350_zend_random_bytes_insecure(zend_random_bytes_insecure_state *
 int rp2350_eval_startup(void)
 {
 	zend_utility_functions zuf = {0};
-	char diag[160];
-	int n;
 
 	if (rp2350_zend_started) {
 		rp2350_eval_error = "ok";
@@ -753,22 +733,10 @@ int rp2350_eval_startup(void)
 	zuf.random_bytes_insecure_function = rp2350_zend_random_bytes_insecure;
 
 	zend_startup(&zuf);
-	n = snprintf(diag, sizeof(diag),
-		"[zend] after startup: ce_exception=%p ce_error=%p\r\n",
-		(void *)zend_ce_exception, (void *)zend_ce_error);
-	if (n > 0) {
-		rp2350_platform_write(diag, (size_t)n);
-	}
 
 	/* Run internal module MINITs (Core, etc), which registers exception classes. */
 	zend_startup_modules();
 	zend_collect_module_handlers();
-	n = snprintf(diag, sizeof(diag),
-		"[zend] after startup_modules: ce_exception=%p ce_error=%p\r\n",
-		(void *)zend_ce_exception, (void *)zend_ce_error);
-	if (n > 0) {
-		rp2350_platform_write(diag, (size_t)n);
-	}
 	if (zend_ce_exception == NULL || zend_ce_error == NULL) {
 		rp2350_platform_write("[zend] core classes missing after zend_startup_modules\r\n",
 			sizeof("[zend] core classes missing after zend_startup_modules\r\n") - 1);
@@ -782,12 +750,6 @@ int rp2350_eval_startup(void)
 	if (zend_post_startup() == FAILURE) {
 		rp2350_eval_error = "zend_post_startup failed";
 		return -1;
-	}
-	n = snprintf(diag, sizeof(diag),
-		"[zend] after post_startup: ce_exception=%p ce_error=%p\r\n",
-		(void *)zend_ce_exception, (void *)zend_ce_error);
-	if (n > 0) {
-		rp2350_platform_write(diag, (size_t)n);
 	}
 	if (zend_ce_exception == NULL || zend_ce_error == NULL) {
 		rp2350_platform_write("[zend] core classes missing after zend_post_startup\r\n",
@@ -806,20 +768,8 @@ int rp2350_eval_startup(void)
 	zend_activate();
 	/* We don't run full php_module_startup INI defaults yet; set sane float precision. */
 	EG(precision) = 14;
-	{
-		char fline[256];
-		static const char *const fnames[] = {
-			"file_get_contents", "strlen", "ord", "chr", "substr", "str_repeat", "is_string"
-		};
-		size_t i;
-		for (i = 0; i < sizeof(fnames) / sizeof(fnames[0]); i++) {
-			int ok = zend_hash_str_exists(CG(function_table), fnames[i], strlen(fnames[i])) ? 1 : 0;
-			int m = snprintf(fline, sizeof(fline), "[zend] fn %s=%d\r\n", fnames[i], ok);
-			if (m > 0) {
-				rp2350_platform_write(fline, (size_t)m);
-			}
-		}
-	}
+	/* Ensure stream allocation uses a non-zero chunk size (needed for fopen/fread/fgetc paths). */
+	FG(def_chunk_size) = 8192;
 	rp2350_zend_started = true;
 	rp2350_eval_error = "ok";
 	return 0;

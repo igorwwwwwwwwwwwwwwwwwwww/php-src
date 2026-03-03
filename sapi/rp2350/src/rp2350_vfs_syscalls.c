@@ -181,6 +181,8 @@ int _fstat(int fd, struct stat *st)
 	st->st_mode = S_IFREG | 0444;
 	st->st_nlink = 1;
 	st->st_size = (off_t)entry->file->len;
+	st->st_blksize = 512;
+	st->st_blocks = (blkcnt_t)((entry->file->len + 511u) / 512u);
 	return 0;
 }
 
@@ -196,5 +198,7 @@ int _stat(const char *path, struct stat *st)
 	st->st_mode = S_IFREG | 0444;
 	st->st_nlink = 1;
 	st->st_size = (off_t)file->len;
+	st->st_blksize = 512;
+	st->st_blocks = (blkcnt_t)((file->len + 511u) / 512u);
 	return 0;
 }
