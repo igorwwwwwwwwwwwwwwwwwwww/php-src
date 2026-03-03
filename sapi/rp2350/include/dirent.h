@@ -31,4 +31,9 @@ static inline struct dirent *readdir(DIR *dirp)
 	return (struct dirent *) 0;
 }
 
+static inline void rewinddir(DIR *dirp)
+{
+	(void) dirp;
+}
+
 #endif /* RP2350_FAKE_DIRENT_H */

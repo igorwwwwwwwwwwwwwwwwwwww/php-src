@@ -69,6 +69,8 @@ list(REMOVE_ITEM ZEND_ENGINE_SOURCES
 add_executable(php_mcu_firmware
   src/main.c
   src/fault_handlers.c
+  src/rp2350_vfs_syscalls.c
+  src/php_runtime_stubs.c
   rp2350_eval_zend.c
   rp2350_psram.c
   rp2350_zend_fibers_stub.c
@@ -76,6 +78,17 @@ add_executable(php_mcu_firmware
   rp2350_posix_stubs.c
   rp2350_mmap.c
   rp2350_transport_pico.c
+  ${PHP_SRC_ROOT}/main/streams/cast.c
+  ${PHP_SRC_ROOT}/main/streams/filter.c
+  ${PHP_SRC_ROOT}/main/streams/glob_wrapper.c
+  ${PHP_SRC_ROOT}/main/streams/memory.c
+  ${PHP_SRC_ROOT}/main/streams/mmap.c
+  ${PHP_SRC_ROOT}/main/streams/plain_wrapper.c
+  ${PHP_SRC_ROOT}/main/streams/streams.c
+  ${PHP_SRC_ROOT}/main/streams/userspace.c
+  ${PHP_SRC_ROOT}/main/fopen_wrappers.c
+  ${PHP_SRC_ROOT}/main/strlcpy.c
+  ${PHP_SRC_ROOT}/ext/standard/file.c
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
 )

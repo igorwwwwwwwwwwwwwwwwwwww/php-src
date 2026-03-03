@@ -3,6 +3,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <stdio.h>
 #include <utime.h>
 
 char *getenv(const char *name)
@@ -61,6 +62,81 @@ int utime(const char *filename, const struct utimbuf *times)
 {
 	(void) filename;
 	(void) times;
+	errno = ENOSYS;
+	return -1;
+}
+
+int mkdir(const char *path, mode_t mode)
+{
+	(void) path;
+	(void) mode;
+	errno = ENOSYS;
+	return -1;
+}
+
+int rmdir(const char *path)
+{
+	(void) path;
+	errno = ENOSYS;
+	return -1;
+}
+
+int chmod(const char *path, mode_t mode)
+{
+	(void) path;
+	(void) mode;
+	errno = ENOSYS;
+	return -1;
+}
+
+int chown(const char *path, uid_t owner, gid_t group)
+{
+	(void) path;
+	(void) owner;
+	(void) group;
+	errno = ENOSYS;
+	return -1;
+}
+
+mode_t umask(mode_t mask)
+{
+	(void) mask;
+	return 0;
+}
+
+int fsync(int fd)
+{
+	(void) fd;
+	errno = ENOSYS;
+	return -1;
+}
+
+int fdatasync(int fd)
+{
+	(void) fd;
+	errno = ENOSYS;
+	return -1;
+}
+
+int ftruncate(int fd, off_t length)
+{
+	(void) fd;
+	(void) length;
+	errno = ENOSYS;
+	return -1;
+}
+
+int pclose(FILE *stream)
+{
+	(void) stream;
+	errno = ENOSYS;
+	return -1;
+}
+
+int flock(int fd, int operation)
+{
+	(void) fd;
+	(void) operation;
 	errno = ENOSYS;
 	return -1;
 }
