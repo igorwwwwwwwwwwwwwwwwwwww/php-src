@@ -103,6 +103,7 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/spprintf.c
   ${PHP_SRC_ROOT}/main/strlcpy.c
   ${PHP_SRC_ROOT}/ext/standard/file.c
+  ${PHP_SRC_ROOT}/ext/standard/string.c
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
 )

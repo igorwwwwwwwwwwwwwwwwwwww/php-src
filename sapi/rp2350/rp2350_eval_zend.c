@@ -316,115 +316,13 @@ ZEND_FUNCTION(sleep)
 	RETURN_LONG(0);
 }
 
-ZEND_FUNCTION(ord)
-{
-	char *str = NULL;
-	size_t str_len = 0;
+ZEND_FUNCTION(ord);
 
-	ZEND_PARSE_PARAMETERS_START(1, 1)
-		Z_PARAM_STRING(str, str_len)
-	ZEND_PARSE_PARAMETERS_END();
+ZEND_FUNCTION(chr);
 
-	if (str_len == 0) {
-		RETURN_FALSE;
-	}
-	RETURN_LONG((unsigned char)str[0]);
-}
+ZEND_FUNCTION(substr);
 
-ZEND_FUNCTION(chr)
-{
-	zend_long cp = 0;
-	char out[1];
-
-	ZEND_PARSE_PARAMETERS_START(1, 1)
-		Z_PARAM_LONG(cp)
-	ZEND_PARSE_PARAMETERS_END();
-
-	out[0] = (char)(cp & 0xff);
-	RETURN_STRINGL(out, 1);
-}
-
-ZEND_FUNCTION(substr)
-{
-	char *str = NULL;
-	size_t str_len = 0;
-	zend_long offset = 0;
-	zend_long length = 0;
-	bool has_length = false;
-	zend_long start;
-	zend_long use_len;
-	zend_long max_len;
-
-	ZEND_PARSE_PARAMETERS_START(2, 3)
-		Z_PARAM_STRING(str, str_len)
-		Z_PARAM_LONG(offset)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_LONG(length)
-		has_length = true;
-	ZEND_PARSE_PARAMETERS_END();
-
-	start = offset;
-	if (start < 0) {
-		start += (zend_long)str_len;
-	}
-	if (start < 0) {
-		start = 0;
-	}
-	if ((size_t)start >= str_len) {
-		RETURN_EMPTY_STRING();
-	}
-
-	max_len = (zend_long)str_len - start;
-	if (!has_length) {
-		use_len = max_len;
-	} else if (length < 0) {
-		use_len = max_len + length;
-		if (use_len < 0) {
-			use_len = 0;
-		}
-	} else {
-		use_len = length;
-		if (use_len > max_len) {
-			use_len = max_len;
-		}
-	}
-
-	RETURN_STRINGL(str + start, (size_t)use_len);
-}
-
-ZEND_FUNCTION(str_repeat)
-{
-	char *input = NULL;
-	size_t input_len = 0;
-	zend_long mult = 0;
-	size_t total_len = 0;
-	zend_string *out;
-	char *dst;
-	zend_long i;
-
-	ZEND_PARSE_PARAMETERS_START(2, 2)
-		Z_PARAM_STRING(input, input_len)
-		Z_PARAM_LONG(mult)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (mult < 0) {
-		RETURN_FALSE;
-	}
-	if (mult == 0 || input_len == 0) {
-		RETURN_EMPTY_STRING();
-	}
-	if ((size_t)mult > (SIZE_MAX / input_len)) {
-		RETURN_FALSE;
-	}
-	total_len = input_len * (size_t)mult;
-	out = zend_string_alloc(total_len, 0);
-	dst = ZSTR_VAL(out);
-	for (i = 0; i < mult; i++) {
-		memcpy(dst + ((size_t)i * input_len), input, input_len);
-	}
-	ZSTR_VAL(out)[total_len] = '\0';
-	RETURN_NEW_STR(out);
-}
+ZEND_FUNCTION(str_repeat);
 
 ZEND_FUNCTION(is_string)
 {
