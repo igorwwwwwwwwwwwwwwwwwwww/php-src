@@ -24,18 +24,39 @@ project(php_mcu_firmware C CXX ASM)
 pico_sdk_init()
 
 set(PHP_SRC_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
-set(RP2350_MAIN_PHP_PATH "${CMAKE_CURRENT_LIST_DIR}/main.php")
-set(RP2350_MAIN_PHP_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/rp2350_main_php.h")
+set(RP2350_VFS_HEADER "${CMAKE_CURRENT_BINARY_DIR}/generated/rp2350_vfs.h")
+set(RP2350_VFS_FILES "${CMAKE_CURRENT_LIST_DIR}/main.php")
+file(GLOB RP2350_VFS_EXTRA_FILES "${CMAKE_CURRENT_LIST_DIR}/fs/*.php")
+list(APPEND RP2350_VFS_FILES ${RP2350_VFS_EXTRA_FILES})
 
-file(READ "${RP2350_MAIN_PHP_PATH}" RP2350_MAIN_PHP_RAW)
-string(REPLACE "\\" "\\\\" RP2350_MAIN_PHP_ESC "${RP2350_MAIN_PHP_RAW}")
-string(REPLACE "\"" "\\\"" RP2350_MAIN_PHP_ESC "${RP2350_MAIN_PHP_ESC}")
-string(REPLACE "\n" "\\n\"\n\"" RP2350_MAIN_PHP_ESC "${RP2350_MAIN_PHP_ESC}")
-configure_file(
-  "${CMAKE_CURRENT_LIST_DIR}/src/rp2350_main_php.h.in"
-  "${RP2350_MAIN_PHP_HEADER}"
-  @ONLY
-)
+set(RP2350_VFS_TEXT
+"#ifndef RP2350_VFS_H\n#define RP2350_VFS_H\n\n#include <stddef.h>\n\ntypedef struct {\n  const char *path;\n  const char *source;\n  size_t len;\n} rp2350_vfs_file_t;\n\n")
+
+set(RP2350_VFS_INDEX 0)
+set(RP2350_VFS_TABLE_ENTRIES "")
+foreach(RP2350_VFS_FILE ${RP2350_VFS_FILES})
+  if(RP2350_VFS_FILE STREQUAL "${CMAKE_CURRENT_LIST_DIR}/main.php")
+    set(RP2350_VFS_PATH "/main.php")
+  else()
+    get_filename_component(RP2350_VFS_NAME "${RP2350_VFS_FILE}" NAME)
+    set(RP2350_VFS_PATH "/${RP2350_VFS_NAME}")
+  endif()
+  file(READ "${RP2350_VFS_FILE}" RP2350_VFS_RAW)
+  string(REPLACE "\\" "\\\\" RP2350_VFS_ESC "${RP2350_VFS_RAW}")
+  string(REPLACE "\"" "\\\"" RP2350_VFS_ESC "${RP2350_VFS_ESC}")
+  string(REPLACE "\n" "\\n\"\n\"" RP2350_VFS_ESC "${RP2350_VFS_ESC}")
+  string(APPEND RP2350_VFS_TEXT
+    "static const char rp2350_vfs_src_${RP2350_VFS_INDEX}[] =\n\"${RP2350_VFS_ESC}\";\n\n")
+  string(APPEND RP2350_VFS_TABLE_ENTRIES
+    "  { \"${RP2350_VFS_PATH}\", rp2350_vfs_src_${RP2350_VFS_INDEX}, sizeof(rp2350_vfs_src_${RP2350_VFS_INDEX}) - 1 },\n")
+  math(EXPR RP2350_VFS_INDEX "${RP2350_VFS_INDEX} + 1")
+endforeach()
+
+string(APPEND RP2350_VFS_TEXT
+  "static const rp2350_vfs_file_t rp2350_vfs_files[] = {\n${RP2350_VFS_TABLE_ENTRIES}};\n\n"
+  "static const size_t rp2350_vfs_files_count = sizeof(rp2350_vfs_files) / sizeof(rp2350_vfs_files[0]);\n\n"
+  "#endif /* RP2350_VFS_H */\n")
+file(WRITE "${RP2350_VFS_HEADER}" "${RP2350_VFS_TEXT}")
 
 file(GLOB ZEND_ENGINE_SOURCES "${PHP_SRC_ROOT}/Zend/*.c")
 list(REMOVE_ITEM ZEND_ENGINE_SOURCES

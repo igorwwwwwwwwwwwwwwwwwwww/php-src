@@ -11,6 +11,7 @@ PHP as an embedded firmware runtime on the RP2350.  Target board: **Pimoroni Bad
 - POSIX shims stub out filesystem / signals / fibers / setjmp
 - Single builtin: `mcu_sleep_ms(int $ms)` — blocking delay from PHP
 - Zend observer runtime is explicitly disabled during bring-up to avoid allocator-path crashes
+- Embedded fake filesystem is enabled for script loading (`/main.php`, `/lib.php`, etc)
 - Board I/O via overridable weak symbols:
   - `rp2350_platform_write()`  / `rp2350_platform_flush()`
   - `rp2350_platform_log()`    / `rp2350_platform_readline()`
@@ -21,6 +22,7 @@ PHP as an embedded firmware runtime on the RP2350.  Target board: **Pimoroni Bad
 | File | Purpose |
 |------|---------|
 | `src/main.c` | Firmware entry point: init stdio → init PSRAM → run `main.php` forever |
+| `fs/*.php` | Extra embedded VFS files for `require` / `include` (mapped as `/<name>.php`) |
 | `rp2350_psram.c` / `.h` | PSRAM QPI init + (currently disabled) Zend MM handoff |
 | `rp2350_eval_zend.c` | Zend engine bring-up, `mcu_sleep_ms` registration, `rp2350_eval_execute()` |
 | `rp2350_transport_pico.c` | Pico SDK strong overrides for platform I/O |
@@ -139,10 +141,11 @@ Notes:
   - `rp2350_psram_init`
   - `rp2350_eval_startup`
 
-## Customising the PHP script
+## Customising scripts
 
-Edit `sapi/rp2350/main.php`, then rebuild and reflash.  The file is embedded
-at cmake configure time as a C string in `build_badger/generated/rp2350_main_php.h`.
+Edit `sapi/rp2350/main.php`, then rebuild and reflash.
+Additional PHP files can be placed in `sapi/rp2350/fs/*.php` and loaded from
+PHP using `require '/name.php';` (absolute VFS path).
 
 ## Memory layout
 
@@ -157,7 +160,6 @@ at cmake configure time as a C string in `build_badger/generated/rp2350_main_php
 - Build with default configuration
 - Flash with `picotool load -x sapi/rp2350/build_badger/php_mcu_firmware.uf2 -f`
 - UART shows repeated `tick` from `main.php`
-- `main.php` for `zend_eval_stringl()` should be raw code (no `<?php` open tag)
 
 ## TODO: PSRAM Zend heap reintegration
 

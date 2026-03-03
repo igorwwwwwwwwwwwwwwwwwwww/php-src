@@ -4,6 +4,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 #include "pico/stdlib.h"
 
@@ -15,12 +16,85 @@
 #include "Zend/zend_observer.h"
 #include "Zend/zend_smart_str.h"
 #include "Zend/zend_smart_string.h"
+#include "Zend/zend_stream.h"
 
 #include "rp2350_eval.h"
 #include "rp2350_psram.h"
 #include "rp2350_transport.h"
+#include "rp2350_vfs.h"
 
 static bool rp2350_zend_started = false;
+
+typedef struct {
+	const char *src;
+	size_t len;
+	size_t pos;
+} rp2350_vfs_stream_t;
+
+static const rp2350_vfs_file_t *rp2350_vfs_find(const char *path)
+{
+	size_t i;
+	for (i = 0; i < rp2350_vfs_files_count; i++) {
+		if (strcmp(rp2350_vfs_files[i].path, path) == 0) {
+			return &rp2350_vfs_files[i];
+		}
+	}
+	return NULL;
+}
+
+static bool rp2350_vfs_resolve_candidate(const char *input, char *out, size_t out_size)
+{
+	if (strncmp(input, "file://", 7) == 0) {
+		input += 7;
+	}
+	if (input[0] == '/') {
+		snprintf(out, out_size, "%s", input);
+		return true;
+	}
+	if (strncmp(input, "./", 2) == 0) {
+		snprintf(out, out_size, "/%s", input + 2);
+		return true;
+	}
+	{
+		zend_string *exec_file = zend_get_executed_filename_ex();
+		const char *base = exec_file ? ZSTR_VAL(exec_file) : "/main.php";
+		const char *slash = strrchr(base, '/');
+		size_t dir_len = slash ? (size_t)(slash - base) : 0;
+		if (dir_len == 0) {
+			snprintf(out, out_size, "/%s", input);
+			return true;
+		}
+		snprintf(out, out_size, "%.*s/%s", (int)dir_len, base, input);
+		return true;
+	}
+}
+
+static ssize_t rp2350_vfs_reader(void *handle, char *buf, size_t len)
+{
+	rp2350_vfs_stream_t *s = (rp2350_vfs_stream_t *)handle;
+	size_t remaining;
+	size_t n;
+
+	if (!s || s->pos >= s->len) {
+		return 0;
+	}
+	remaining = s->len - s->pos;
+	n = len < remaining ? len : remaining;
+	memcpy(buf, s->src + s->pos, n);
+	s->pos += n;
+	return (ssize_t)n;
+}
+
+static size_t rp2350_vfs_fsizer(void *handle)
+{
+	rp2350_vfs_stream_t *s = (rp2350_vfs_stream_t *)handle;
+	return s ? s->len : 0;
+}
+
+static void rp2350_vfs_closer(void *handle)
+{
+	free(handle);
+}
 
 ZEND_FUNCTION(mcu_sleep_ms);
 
@@ -120,8 +194,38 @@ static void rp2350_zend_timeout(int seconds)
 
 static zend_result rp2350_zend_stream_open(zend_file_handle *handle)
 {
-	(void) handle;
-	return FAILURE;
+	char path[192];
+	rp2350_vfs_stream_t *stream;
+	const rp2350_vfs_file_t *file;
+
+	if (!handle || !handle->filename) {
+		return FAILURE;
+	}
+	if (!rp2350_vfs_resolve_candidate(ZSTR_VAL(handle->filename), path, sizeof(path))) {
+		return FAILURE;
+	}
+
+	file = rp2350_vfs_find(path);
+	if (!file) {
+		return FAILURE;
+	}
+
+	stream = (rp2350_vfs_stream_t *)malloc(sizeof(*stream));
+	if (!stream) {
+		return FAILURE;
+	}
+	stream->src = file->source;
+	stream->len = file->len;
+	stream->pos = 0;
+
+	handle->type = ZEND_HANDLE_STREAM;
+	handle->handle.stream.handle = stream;
+	handle->handle.stream.isatty = 0;
+	handle->handle.stream.reader = rp2350_vfs_reader;
+	handle->handle.stream.fsizer = rp2350_vfs_fsizer;
+	handle->handle.stream.closer = rp2350_vfs_closer;
+	handle->opened_path = zend_string_init(path, strlen(path), 0);
+	return SUCCESS;
 }
 
 static void rp2350_zend_printf_to_smart_string(smart_string *buf, const char *format, va_list ap)
@@ -157,7 +261,20 @@ static char *rp2350_zend_getenv(const char *name, size_t name_len)
 
 static zend_string *rp2350_zend_resolve_path(zend_string *filename)
 {
-	return filename;
+	char path[192];
+	const rp2350_vfs_file_t *file;
+
+	if (!filename) {
+		return NULL;
+	}
+	if (!rp2350_vfs_resolve_candidate(ZSTR_VAL(filename), path, sizeof(path))) {
+		return NULL;
+	}
+	file = rp2350_vfs_find(path);
+	if (!file) {
+		return NULL;
+	}
+	return zend_string_init(path, strlen(path), 0);
 }
 
 static uint32_t rp2350_prng_state = 0x12345678u;
@@ -256,5 +373,24 @@ int rp2350_eval_execute(const char *code, size_t len)
 		return -1;
 	}
 
+	return 0;
+}
+
+int rp2350_eval_execute_file(const char *path)
+{
+	zend_file_handle file_handle;
+
+	if (rp2350_eval_startup() != 0) {
+		rp2350_platform_write("[zend] startup failed\r\n", sizeof("[zend] startup failed\r\n") - 1);
+		return -1;
+	}
+
+	zend_stream_init_filename(&file_handle, path);
+	if (zend_execute_script(ZEND_REQUIRE, NULL, &file_handle) == FAILURE) {
+		if (EG(exception)) {
+			zend_clear_exception();
+		}
+		return -1;
+	}
 	return 0;
 }

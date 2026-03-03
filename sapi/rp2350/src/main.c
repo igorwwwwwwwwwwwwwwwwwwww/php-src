@@ -4,7 +4,6 @@
 #include "pico/stdlib.h"
 
 #include "rp2350_eval.h"
-#include "rp2350_main_php.h"
 #include "rp2350_psram.h"
 #include "rp2350_transport.h"
 
@@ -40,7 +39,7 @@ int main(void)
 
 	log_line("[boot] run main.php\r\n");
 	while (true) {
-		if (rp2350_eval_execute(rp2350_main_php_source, rp2350_main_php_source_len) != 0) {
+		if (rp2350_eval_execute_file("/main.php") != 0) {
 			log_line("[php] main.php error\r\n");
 			sleep_ms(1000);
 		}

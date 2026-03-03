@@ -1,4 +1,7 @@
+<?php
+require '/lib.php';
+
 while (true) {
-    print "tick\n";
+    print tick_line();
     mcu_sleep_ms(1000);
 }
