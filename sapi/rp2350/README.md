@@ -93,6 +93,8 @@ picocom -b 115200 --imap lfcrlf /dev/cu.usbmodem101
 
 If one-shot boot logs are easy to miss, set `-DRP2350_WAIT_FOR_USB_SERIAL_MS=<ms>` during configure.
 
+If PHP execution fails and you see repeated `[halt] php main: ...`, the halt line includes the last captured Zend error (`zend=...`) for quick triage.
+
 ## Fast dev loop
 
 ```bash

@@ -1,19 +1,24 @@
 <?php
 require '/lib.php';
+print "req:lib:ok\n";
 require '/logo.php';
+print "req:logo:ok\n";
 
 $did_epd = false;
 
 while (true) {
     if (!$did_epd) {
-        $w = PHP_LOGO_W;
-        $h = PHP_LOGO_H;
-        $buf = php_logo_bytes();
+        print "logo:decode:start\n";
+        $logo = php_logo_data();
+        print "logo:decode:done\n";
         print "epd:render\n";
-        if ($buf !== '') {
+        if ($logo !== false) {
+            $buf = $logo[0];
+            $w = $logo[1];
+            $h = $logo[2];
             mcu_epd_render($buf, $w, $h);
         } else {
-            print "epd:logo-bytes-fail\n";
+            print "epd:logo-decode-fail\n";
         }
         $did_epd = true;
     }

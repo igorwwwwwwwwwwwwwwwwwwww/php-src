@@ -33,6 +33,7 @@ static void maybe_wait_for_usb_serial(void)
 
 int main(void)
 {
+	char build_line[96];
 	/* Avoid HardFault escalation when we can report the original fault class. */
 	scb_hw->shcsr |= M33_SHCSR_MEMFAULTENA_BITS
 		| M33_SHCSR_BUSFAULTENA_BITS
@@ -55,6 +56,8 @@ int main(void)
 	sleep_ms(300);
 
 	log_line("\r\n[boot] php-mcu\r\n");
+	snprintf(build_line, sizeof(build_line), "[boot] build %s %s\r\n", __DATE__, __TIME__);
+	log_line(build_line);
 	log_line("[boot] psram init OK\r\n");
 	if (rp2350_rtc_sync_system_time()) {
 		log_line("[boot] rtc sync OK\r\n");
@@ -63,10 +66,13 @@ int main(void)
 	}
 
 	if (rp2350_eval_startup() != 0) {
-		char line[160];
+		char line[512];
 		log_line("[boot] zend startup FAIL\r\n");
 		while (true) {
-			snprintf(line, sizeof(line), "[halt] zend: %s\r\n", rp2350_eval_last_error());
+			int n = snprintf(line, sizeof(line), "[halt] zend: %s\r\n", rp2350_eval_last_error());
+			if (n < 0 || n >= (int)sizeof(line)) {
+				snprintf(line, sizeof(line), "[halt] zend: <truncated>\r\n");
+			}
 			log_line(line);
 			sleep_ms(1000);
 		}
@@ -75,10 +81,13 @@ int main(void)
 
 	log_line("[boot] run main.php\r\n");
 	if (rp2350_eval_execute_file("/main.php") != 0) {
-		char line[160];
+		char line[512];
 		log_line("[php] main.php error\r\n");
 		while (true) {
-			snprintf(line, sizeof(line), "[halt] php main: %s\r\n", rp2350_eval_last_error());
+			int n = snprintf(line, sizeof(line), "[halt] php main: %s\r\n", rp2350_eval_last_error());
+			if (n < 0 || n >= (int)sizeof(line)) {
+				snprintf(line, sizeof(line), "[halt] php main: <truncated>\r\n");
+			}
 			log_line(line);
 			sleep_ms(1000);
 		}

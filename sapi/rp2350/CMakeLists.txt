@@ -99,6 +99,8 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/streams/streams.c
   ${PHP_SRC_ROOT}/main/streams/userspace.c
   ${PHP_SRC_ROOT}/main/fopen_wrappers.c
+  ${PHP_SRC_ROOT}/main/snprintf.c
+  ${PHP_SRC_ROOT}/main/spprintf.c
   ${PHP_SRC_ROOT}/main/strlcpy.c
   ${PHP_SRC_ROOT}/ext/standard/file.c
   ${PHP_SRC_ROOT}/TSRM/TSRM.c

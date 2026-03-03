@@ -1,4 +1,4 @@
 <?php
-function tick_line(): string {
+function tick_line() {
     return "tick\n";
 }

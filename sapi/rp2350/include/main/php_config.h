@@ -29,6 +29,8 @@
 #undef ZEND_SIGNALS
 #undef HAVE_SETITIMER
 #undef HAVE_SIGACTION
+#undef HAVE_ASPRINTF
+#undef HAVE_VASPRINTF
 
 #include <setjmp.h>
 #ifndef sigjmp_buf

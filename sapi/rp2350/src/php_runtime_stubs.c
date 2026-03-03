@@ -27,9 +27,13 @@ PHPAPI ZEND_COLD void php_verror(const char *docref, const char *params, int typ
 {
 	(void)docref;
 	(void)params;
-	char buf[384];
-	vsnprintf(buf, sizeof(buf), format, args);
-	zend_error(type, "%s", buf);
+	zend_string *msg = vstrpprintf(0, format, args);
+	if (msg) {
+		zend_error_zstr(type, msg);
+		zend_string_release(msg);
+	} else {
+		zend_error(type, "%s", "php_verror: format failure");
+	}
 }
 
 PHPAPI ZEND_COLD void php_error_docref(const char *docref, int type, const char *format, ...)

@@ -29,6 +29,15 @@
 
 static bool rp2350_zend_started = false;
 static const char *rp2350_eval_error = "ok";
+static char rp2350_eval_error_detail[256];
+static char rp2350_last_zend_error[192];
+static bool rp2350_stream_open_seen = false;
+static char rp2350_stream_open_last_in[96];
+static char rp2350_stream_open_last_path[96];
+static const char *rp2350_stream_open_last_reason = "none";
+
+extern void php_printf_to_smart_string(smart_string *buf, const char *format, va_list ap);
+extern void php_printf_to_smart_str(smart_str *buf, const char *format, va_list ap);
 
 typedef struct {
 	const char *src;
@@ -107,6 +116,11 @@ ZEND_FUNCTION(time);
 ZEND_FUNCTION(microtime);
 ZEND_FUNCTION(hrtime);
 ZEND_FUNCTION(sleep);
+ZEND_FUNCTION(ord);
+ZEND_FUNCTION(chr);
+ZEND_FUNCTION(substr);
+ZEND_FUNCTION(str_repeat);
+ZEND_FUNCTION(is_string);
 ZEND_FUNCTION(mcu_epd_fill);
 ZEND_FUNCTION(mcu_epd_clear);
 ZEND_FUNCTION(mcu_epd_set_pixel);
@@ -134,6 +148,29 @@ ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_sleep_mcu, 0, 1, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, seconds, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_ord_mcu, 0, 0, 1)
+	ZEND_ARG_TYPE_INFO(0, str, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_chr_mcu, 0, 0, 1)
+	ZEND_ARG_TYPE_INFO(0, codepoint, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_substr_mcu, 0, 0, 2)
+	ZEND_ARG_TYPE_INFO(0, str, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, offset, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, length, IS_LONG, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_str_repeat_mcu, 0, 0, 2)
+	ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, multiplier, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_is_string_mcu, 0, 0, 1)
+	ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_fill, 0, 1, _IS_BOOL, 0)
@@ -168,6 +205,11 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(microtime, arginfo_microtime_mcu)
 	ZEND_FE(hrtime, arginfo_hrtime_mcu)
 	ZEND_FE(sleep, arginfo_sleep_mcu)
+	ZEND_FE(ord, arginfo_ord_mcu)
+	ZEND_FE(chr, arginfo_chr_mcu)
+	ZEND_FE(substr, arginfo_substr_mcu)
+	ZEND_FE(str_repeat, arginfo_str_repeat_mcu)
+	ZEND_FE(is_string, arginfo_is_string_mcu)
 	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
 	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
 	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
@@ -274,6 +316,127 @@ ZEND_FUNCTION(sleep)
 	RETURN_LONG(0);
 }
 
+ZEND_FUNCTION(ord)
+{
+	char *str = NULL;
+	size_t str_len = 0;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STRING(str, str_len)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (str_len == 0) {
+		RETURN_FALSE;
+	}
+	RETURN_LONG((unsigned char)str[0]);
+}
+
+ZEND_FUNCTION(chr)
+{
+	zend_long cp = 0;
+	char out[1];
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(cp)
+	ZEND_PARSE_PARAMETERS_END();
+
+	out[0] = (char)(cp & 0xff);
+	RETURN_STRINGL(out, 1);
+}
+
+ZEND_FUNCTION(substr)
+{
+	char *str = NULL;
+	size_t str_len = 0;
+	zend_long offset = 0;
+	zend_long length = 0;
+	bool has_length = false;
+	zend_long start;
+	zend_long use_len;
+	zend_long max_len;
+
+	ZEND_PARSE_PARAMETERS_START(2, 3)
+		Z_PARAM_STRING(str, str_len)
+		Z_PARAM_LONG(offset)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(length)
+		has_length = true;
+	ZEND_PARSE_PARAMETERS_END();
+
+	start = offset;
+	if (start < 0) {
+		start += (zend_long)str_len;
+	}
+	if (start < 0) {
+		start = 0;
+	}
+	if ((size_t)start >= str_len) {
+		RETURN_EMPTY_STRING();
+	}
+
+	max_len = (zend_long)str_len - start;
+	if (!has_length) {
+		use_len = max_len;
+	} else if (length < 0) {
+		use_len = max_len + length;
+		if (use_len < 0) {
+			use_len = 0;
+		}
+	} else {
+		use_len = length;
+		if (use_len > max_len) {
+			use_len = max_len;
+		}
+	}
+
+	RETURN_STRINGL(str + start, (size_t)use_len);
+}
+
+ZEND_FUNCTION(str_repeat)
+{
+	char *input = NULL;
+	size_t input_len = 0;
+	zend_long mult = 0;
+	size_t total_len = 0;
+	zend_string *out;
+	char *dst;
+	zend_long i;
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_STRING(input, input_len)
+		Z_PARAM_LONG(mult)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (mult < 0) {
+		RETURN_FALSE;
+	}
+	if (mult == 0 || input_len == 0) {
+		RETURN_EMPTY_STRING();
+	}
+	if ((size_t)mult > (SIZE_MAX / input_len)) {
+		RETURN_FALSE;
+	}
+	total_len = input_len * (size_t)mult;
+	out = zend_string_alloc(total_len, 0);
+	dst = ZSTR_VAL(out);
+	for (i = 0; i < mult; i++) {
+		memcpy(dst + ((size_t)i * input_len), input, input_len);
+	}
+	ZSTR_VAL(out)[total_len] = '\0';
+	RETURN_NEW_STR(out);
+}
+
+ZEND_FUNCTION(is_string)
+{
+	zval *zv = NULL;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_ZVAL(zv)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(Z_TYPE_P(zv) == IS_STRING);
+}
+
 ZEND_FUNCTION(mcu_epd_fill)
 {
 	bool black = false;
@@ -356,18 +519,35 @@ ZEND_FUNCTION(mcu_epd_render)
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)
 {
 	char line[384];
+	const char *file = error_filename ? ZSTR_VAL(error_filename) : "<eval>";
+	const char *msg = message ? ZSTR_VAL(message) : "<null>";
+	size_t msg_len = message ? ZSTR_LEN(message) : strlen(msg);
+	if (msg_len > 140) {
+		msg_len = 140;
+	}
 	int n = snprintf(
 		line,
 		sizeof(line),
-		"[zend:%d] %s:%" PRIu32 " %s\r\n",
+		"[zend:%d] %s:%" PRIu32 " %.*s\r\n",
 		type,
-		error_filename ? ZSTR_VAL(error_filename) : "<eval>",
+		file,
 		error_lineno,
-		message ? ZSTR_VAL(message) : "<null>"
+		(int)msg_len,
+		msg
 	);
 	if (n > 0) {
 		rp2350_platform_write(line, (size_t) n);
 	}
+	snprintf(
+		rp2350_last_zend_error,
+		sizeof(rp2350_last_zend_error),
+		"type=%d file=%s:%" PRIu32 " msg=%.*s",
+		type,
+		file,
+		error_lineno,
+		(int)msg_len,
+		msg
+	);
 }
 
 static size_t rp2350_zend_printf(const char *format, ...)
@@ -429,20 +609,28 @@ static zend_result rp2350_zend_stream_open(zend_file_handle *handle)
 	rp2350_vfs_stream_t *stream;
 	const rp2350_vfs_file_t *file;
 
+	rp2350_stream_open_seen = true;
 	if (!handle || !handle->filename) {
+		rp2350_stream_open_last_reason = "invalid-handle";
 		return FAILURE;
 	}
+	snprintf(rp2350_stream_open_last_in, sizeof(rp2350_stream_open_last_in), "%s", ZSTR_VAL(handle->filename));
 	if (!rp2350_vfs_resolve_candidate(ZSTR_VAL(handle->filename), path, sizeof(path))) {
+		rp2350_stream_open_last_reason = "resolve-fail";
 		return FAILURE;
 	}
+	snprintf(rp2350_stream_open_last_path, sizeof(rp2350_stream_open_last_path), "%s", path);
 
 	file = rp2350_vfs_find(path);
 	if (!file) {
+		rp2350_stream_open_last_reason = "vfs-miss";
 		return FAILURE;
 	}
+	rp2350_stream_open_last_reason = "vfs-hit";
 
 	stream = (rp2350_vfs_stream_t *)malloc(sizeof(*stream));
 	if (!stream) {
+		rp2350_stream_open_last_reason = "malloc-fail";
 		return FAILURE;
 	}
 	stream->src = file->source;
@@ -457,6 +645,104 @@ static zend_result rp2350_zend_stream_open(zend_file_handle *handle)
 	handle->handle.stream.closer = rp2350_vfs_closer;
 	handle->opened_path = zend_string_init(path, strlen(path), 0);
 	return SUCCESS;
+}
+
+static void rp2350_log_execute_failure(const char *path)
+{
+	char line[320];
+	zend_string *compiled_file = zend_get_compiled_filename();
+	uint32_t compiled_line = zend_get_compiled_lineno();
+	zend_string *exec_file_now = zend_get_executed_filename_ex();
+	uint32_t exec_line_now = zend_get_executed_lineno();
+	int in_compilation = CG(in_compilation) ? 1 : 0;
+	int unclean_shutdown = CG(unclean_shutdown) ? 1 : 0;
+	int bailout_set = EG(bailout) ? 1 : 0;
+
+	snprintf(line, sizeof(line), "[zend] execute_script failed path=%s\r\n", path ? path : "<null>");
+	rp2350_platform_write(line, strlen(line));
+	rp2350_platform_flush();
+	snprintf(
+		line,
+		sizeof(line),
+		"[zend] state: compiled=%s:%" PRIu32 " exec=%s:%" PRIu32 " in_comp=%d unclean=%d bailout=%d last_in=%s last_path=%s\r\n",
+		compiled_file ? ZSTR_VAL(compiled_file) : "<null>",
+		compiled_line,
+		exec_file_now ? ZSTR_VAL(exec_file_now) : "<null>",
+		exec_line_now,
+		in_compilation,
+		unclean_shutdown,
+		bailout_set,
+		rp2350_stream_open_last_in[0] ? rp2350_stream_open_last_in : "<none>",
+		rp2350_stream_open_last_path[0] ? rp2350_stream_open_last_path : "<none>"
+	);
+	rp2350_platform_write(line, strlen(line));
+	rp2350_platform_flush();
+
+	if (EG(exception)) {
+		zend_object *ex = EG(exception);
+		zval rv_msg;
+		zval rv_file;
+		zval rv_line;
+		zval *zmsg = zend_read_property_ex(ex->ce, ex, ZSTR_KNOWN(ZEND_STR_MESSAGE), 1, &rv_msg);
+		zval *zfile = zend_read_property_ex(ex->ce, ex, ZSTR_KNOWN(ZEND_STR_FILE), 1, &rv_file);
+		zval *zline = zend_read_property_ex(ex->ce, ex, ZSTR_KNOWN(ZEND_STR_LINE), 1, &rv_line);
+		zend_string *smsg = zmsg ? zval_get_string(zmsg) : NULL;
+		zend_string *sfile = zfile ? zval_get_string(zfile) : NULL;
+		zend_long lineno = zline ? zval_get_long(zline) : 0;
+
+		snprintf(
+			line,
+			sizeof(line),
+			"[zend] ex=%s msg=%s file=%s line=%ld\r\n",
+			ex && ex->ce && ex->ce->name ? ZSTR_VAL(ex->ce->name) : "<unknown>",
+			smsg ? ZSTR_VAL(smsg) : "<null>",
+			sfile ? ZSTR_VAL(sfile) : "<null>",
+			(long)lineno
+		);
+		rp2350_platform_write(line, strlen(line));
+		rp2350_platform_flush();
+			snprintf(
+				rp2350_eval_error_detail,
+				sizeof(rp2350_eval_error_detail),
+				"execute exception: %s at %s:%ld",
+			smsg ? ZSTR_VAL(smsg) : "<null>",
+			sfile ? ZSTR_VAL(sfile) : "<null>",
+			(long)lineno
+		);
+		rp2350_eval_error = rp2350_eval_error_detail;
+
+		if (smsg) {
+			zend_string_release(smsg);
+		}
+		if (sfile) {
+			zend_string_release(sfile);
+		}
+	} else {
+		zend_string *exec_file = zend_get_executed_filename_ex();
+		snprintf(
+			line,
+			sizeof(line),
+			"[zend] no exception; executed=%s:%u\r\n",
+			exec_file ? ZSTR_VAL(exec_file) : "<null>",
+			(unsigned)zend_get_executed_lineno()
+		);
+		rp2350_platform_write(line, strlen(line));
+		rp2350_platform_flush();
+			snprintf(
+				rp2350_eval_error_detail,
+				sizeof(rp2350_eval_error_detail),
+				"execute failure at %s:%u stream=%d reason=%s in=%s path=%s req=%s zend=%s",
+				exec_file ? ZSTR_VAL(exec_file) : "<null>",
+				(unsigned)zend_get_executed_lineno(),
+				rp2350_stream_open_seen ? 1 : 0,
+				rp2350_stream_open_last_reason ? rp2350_stream_open_last_reason : "<null>",
+				rp2350_stream_open_last_in[0] ? rp2350_stream_open_last_in : "<none>",
+				rp2350_stream_open_last_path[0] ? rp2350_stream_open_last_path : "<none>",
+				path ? path : "<null>",
+				rp2350_last_zend_error[0] ? rp2350_last_zend_error : "<none>"
+			);
+			rp2350_eval_error = rp2350_eval_error_detail;
+		}
 }
 
 static void rp2350_zend_printf_to_smart_string(smart_string *buf, const char *format, va_list ap)
@@ -561,8 +847,8 @@ int rp2350_eval_startup(void)
 	zuf.ticks_function = rp2350_zend_ticks;
 	zuf.on_timeout = rp2350_zend_timeout;
 	zuf.stream_open_function = rp2350_zend_stream_open;
-	zuf.printf_to_smart_string_function = rp2350_zend_printf_to_smart_string;
-	zuf.printf_to_smart_str_function = rp2350_zend_printf_to_smart_str;
+	zuf.printf_to_smart_string_function = php_printf_to_smart_string;
+	zuf.printf_to_smart_str_function = php_printf_to_smart_str;
 	zuf.getenv_function = rp2350_zend_getenv;
 	zuf.resolve_path_function = rp2350_zend_resolve_path;
 	zuf.random_bytes_function = rp2350_zend_random_bytes;
@@ -622,6 +908,20 @@ int rp2350_eval_startup(void)
 	zend_activate();
 	/* We don't run full php_module_startup INI defaults yet; set sane float precision. */
 	EG(precision) = 14;
+	{
+		char fline[256];
+		static const char *const fnames[] = {
+			"file_get_contents", "strlen", "ord", "chr", "substr", "str_repeat", "is_string"
+		};
+		size_t i;
+		for (i = 0; i < sizeof(fnames) / sizeof(fnames[0]); i++) {
+			int ok = zend_hash_str_exists(CG(function_table), fnames[i], strlen(fnames[i])) ? 1 : 0;
+			int m = snprintf(fline, sizeof(fline), "[zend] fn %s=%d\r\n", fnames[i], ok);
+			if (m > 0) {
+				rp2350_platform_write(fline, (size_t)m);
+			}
+		}
+	}
 	rp2350_zend_started = true;
 	rp2350_eval_error = "ok";
 	return 0;
@@ -657,6 +957,11 @@ const char *rp2350_eval_last_error(void)
 int rp2350_eval_execute_file(const char *path)
 {
 	zend_file_handle file_handle;
+	rp2350_stream_open_seen = false;
+	rp2350_stream_open_last_in[0] = '\0';
+	rp2350_stream_open_last_path[0] = '\0';
+	rp2350_stream_open_last_reason = "none";
+	rp2350_last_zend_error[0] = '\0';
 
 	if (rp2350_eval_startup() != 0) {
 		rp2350_platform_write("[zend] startup failed\r\n", sizeof("[zend] startup failed\r\n") - 1);
@@ -665,12 +970,11 @@ int rp2350_eval_execute_file(const char *path)
 
 	zend_stream_init_filename(&file_handle, path);
 	if (zend_execute_script(ZEND_REQUIRE_ONCE, NULL, &file_handle) == FAILURE) {
+		rp2350_log_execute_failure(path);
 		if (EG(exception)) {
 			(void)zend_exception_error(EG(exception), E_WARNING);
 			zend_clear_exception();
-			rp2350_eval_error = "zend_execute_script exception";
 		} else {
-			rp2350_eval_error = "zend_execute_script failure";
 		}
 		return -1;
 	}
