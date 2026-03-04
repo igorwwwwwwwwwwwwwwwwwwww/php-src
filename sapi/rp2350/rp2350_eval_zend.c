@@ -20,6 +20,7 @@
 #include "Zend/zend_compile.h"
 #include "Zend/zend_exceptions.h"
 #include "Zend/zend_execute.h"
+#include "Zend/zend_ini.h"
 #include "Zend/zend_observer.h"
 #include "Zend/zend_smart_str.h"
 #include "Zend/zend_smart_string.h"
@@ -894,6 +895,47 @@ static void rp2350_sapi_register_variables(zval *track_vars_array)
 	php_import_environment_variables(track_vars_array);
 }
 
+#define RP2350_INI_DEFAULT(name, value) \
+	ZVAL_NEW_STR(&tmp, zend_string_init(value, sizeof(value) - 1, 1)); \
+	zend_hash_str_update(configuration_hash, name, sizeof(name) - 1, &tmp)
+
+static void rp2350_sapi_ini_defaults(HashTable *configuration_hash)
+{
+	zval tmp;
+
+	RP2350_INI_DEFAULT("html_errors", "0");
+	RP2350_INI_DEFAULT("display_errors", "1");
+	RP2350_INI_DEFAULT("display_startup_errors", "1");
+	RP2350_INI_DEFAULT("log_errors", "0");
+}
+
+static void rp2350_force_plain_errors_runtime(void)
+{
+	zend_string *name;
+
+	name = zend_string_init("html_errors", sizeof("html_errors") - 1, 0);
+	(void)zend_alter_ini_entry_chars(name, "0", 1, PHP_INI_USER, PHP_INI_STAGE_RUNTIME);
+	zend_string_release(name);
+
+	name = zend_string_init("display_errors", sizeof("display_errors") - 1, 0);
+	(void)zend_alter_ini_entry_chars(name, "1", 1, PHP_INI_USER, PHP_INI_STAGE_RUNTIME);
+	zend_string_release(name);
+
+	name = zend_string_init("display_startup_errors", sizeof("display_startup_errors") - 1, 0);
+	(void)zend_alter_ini_entry_chars(name, "1", 1, PHP_INI_USER, PHP_INI_STAGE_RUNTIME);
+	zend_string_release(name);
+
+	name = zend_string_init("log_errors", sizeof("log_errors") - 1, 0);
+	(void)zend_alter_ini_entry_chars(name, "0", 1, PHP_INI_USER, PHP_INI_STAGE_RUNTIME);
+	zend_string_release(name);
+
+	/* Force core globals too: some startup paths format before INI settles. */
+	PG(html_errors) = 0;
+	PG(display_errors) = PHP_DISPLAY_ERRORS_STDOUT;
+	PG(display_startup_errors) = 1;
+	PG(log_errors) = 0;
+}
+
 static int rp2350_sapi_deactivate(void)
 {
 	rp2350_platform_flush();
@@ -932,7 +974,7 @@ static sapi_module_struct rp2350_sapi_module = {
 	NULL, /* get_target_uid */
 	NULL, /* get_target_gid */
 	NULL, /* input_filter */
-	NULL, /* ini_defaults */
+	rp2350_sapi_ini_defaults, /* ini_defaults */
 	1, /* phpinfo_as_text */
 	rp2350_ini_entries, /* ini_entries */
 	NULL, /* additional_functions */
@@ -1189,6 +1231,7 @@ int rp2350_eval_execute_file(const char *path)
 		rp2350_eval_error = "php_request_startup failed";
 		return -1;
 	}
+	rp2350_force_plain_errors_runtime();
 	/* Our minimal config stubs don't seed this; zero leads to fread/fgetc zero-byte reads. */
 	FG(def_chunk_size) = 8192;
 	SG(headers_sent) = 1;

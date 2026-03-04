@@ -39,6 +39,9 @@ $batt_pct = mcu_battery_level_from_voltage($batt_v);
 $prev_batt_pct = $batt_pct;
 $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
 
+/* Warning smoke test for UART formatting. */
+trigger_error('rp2350 warning smoke test', E_USER_WARNING);
+
 while (true) {
     $now_s = time();
     $remaining_ms = ($next_log_s - $now_s) * 1000;
