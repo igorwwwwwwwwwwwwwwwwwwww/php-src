@@ -12,16 +12,13 @@ function _u32le($s, $o) {
 function php_logo_data() {
     $bmp = file_get_contents(PHP_LOGO_BMP_PATH);
     if ($bmp === false) {
-        print "logo:bmp:read-fail\n";
         return false;
     }
     $bmp_len = strlen($bmp);
     if ($bmp_len < 54) {
-        print "logo:bmp:short\n";
         return false;
     }
     if (ord($bmp[0]) !== 0x42 || ord($bmp[1]) !== 0x4d) {
-        print "logo:bmp:bad-magic\n";
         return false;
     }
 

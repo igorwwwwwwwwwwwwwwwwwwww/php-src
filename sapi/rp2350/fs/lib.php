@@ -1,7 +1,4 @@
 <?php
-function tick_line() {
-    return "tick\n";
-}
 
 const MCU_EPD_WIDTH = 296;
 const MCU_EPD_HEIGHT = 128;
