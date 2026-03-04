@@ -6,11 +6,9 @@
 #include "pico/stdlib.h"
 
 #include "rp2350_psram.h"
+#include "rp2350_psram_layout.h"
 
 #include <sys/mman.h>
-
-#define RP2350_MMAP_ARENA_OFFSET   (64u * 1024u)
-#define RP2350_MMAP_ARENA_SIZE     (RP2350_PSRAM_SIZE - RP2350_MMAP_ARENA_OFFSET)
 
 static uint8_t *s_mmap_base = NULL;
 static size_t s_mmap_used = 0;
@@ -18,6 +16,20 @@ static size_t s_mmap_used = 0;
 static size_t rp2350_align_up(size_t value, size_t alignment)
 {
 	return (value + alignment - 1u) & ~(alignment - 1u);
+}
+
+static bool rp2350_psram_mmap_init(void)
+{
+	if (!rp2350_psram_is_ready()) {
+		if (!rp2350_psram_init(BW_PSRAM_CS)) {
+			return false;
+		}
+	}
+	if (s_mmap_base == NULL) {
+		s_mmap_base = (uint8_t *)RP2350_PSRAM_BASE + RP2350_MMAP_ARENA_OFFSET;
+		s_mmap_used = 0;
+	}
+	return true;
 }
 
 void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
@@ -36,16 +48,9 @@ void *mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
 		return MAP_FAILED;
 	}
 
-	if (!rp2350_psram_is_ready()) {
-		if (!rp2350_psram_init(BW_PSRAM_CS)) {
-			errno = ENOMEM;
-			return MAP_FAILED;
-		}
-	}
-
-	if (s_mmap_base == NULL) {
-		s_mmap_base = (uint8_t *)RP2350_PSRAM_BASE + RP2350_MMAP_ARENA_OFFSET;
-		s_mmap_used = 0;
+	if (!rp2350_psram_mmap_init()) {
+		errno = ENOMEM;
+		return MAP_FAILED;
 	}
 
 	/* Zend MM expects 2MB-aligned chunk mappings for its main heap chunks. */

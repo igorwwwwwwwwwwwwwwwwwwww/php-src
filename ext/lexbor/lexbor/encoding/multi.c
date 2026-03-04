@@ -13,7 +13,7 @@
 #include "lexbor/encoding/multi.h"
 
 
-LXB_API lxb_codepoint_t lxb_encoding_multi_big5_map[19782] =
+LXB_API const lxb_codepoint_t lxb_encoding_multi_big5_map[19782] =
 {
     LXB_ENCODING_ERROR_CODEPOINT, /* Not defined */
     LXB_ENCODING_ERROR_CODEPOINT, /* Not defined */
@@ -19800,7 +19800,7 @@ LXB_API lxb_codepoint_t lxb_encoding_multi_big5_map[19782] =
 };
 
 
-LXB_API lxb_codepoint_t lxb_encoding_multi_euc_kr_map[23750] =
+LXB_API const lxb_codepoint_t lxb_encoding_multi_euc_kr_map[23750] =
 {
     0xAC02, /* HANGUL SYLLABLE GAGG */
     0xAC03, /* HANGUL SYLLABLE GAGS */
@@ -43555,7 +43555,7 @@ LXB_API lxb_codepoint_t lxb_encoding_multi_euc_kr_map[23750] =
 };
 
 
-LXB_API lxb_codepoint_t lxb_encoding_multi_gb18030_map[23940] =
+LXB_API const lxb_codepoint_t lxb_encoding_multi_gb18030_map[23940] =
 {
     0x4E02, /* <CJK Ideograph> */
     0x4E04, /* <CJK Ideograph> */
@@ -67500,7 +67500,7 @@ LXB_API lxb_codepoint_t lxb_encoding_multi_gb18030_map[23940] =
 };
 
 
-LXB_API lxb_codepoint_t lxb_encoding_multi_iso_2022_jp_katakana_map[63] =
+LXB_API const lxb_codepoint_t lxb_encoding_multi_iso_2022_jp_katakana_map[63] =
 {
     0x3002, /* IDEOGRAPHIC FULL STOP */
     0x300C, /* LEFT CORNER BRACKET */
@@ -67568,7 +67568,7 @@ LXB_API lxb_codepoint_t lxb_encoding_multi_iso_2022_jp_katakana_map[63] =
 };
 
 
-LXB_API lxb_codepoint_t lxb_encoding_multi_jis0212_map[7211] =
+LXB_API const lxb_codepoint_t lxb_encoding_multi_jis0212_map[7211] =
 {
     LXB_ENCODING_ERROR_CODEPOINT, /* Not defined */
     LXB_ENCODING_ERROR_CODEPOINT, /* Not defined */
@@ -74784,7 +74784,7 @@ LXB_API lxb_codepoint_t lxb_encoding_multi_jis0212_map[7211] =
 };
 
 
-LXB_API lxb_codepoint_t lxb_encoding_multi_jis0208_map[11104] =
+LXB_API const lxb_codepoint_t lxb_encoding_multi_jis0208_map[11104] =
 {
     0x3000, /* IDEOGRAPHIC SPACE */
     0x3001, /* IDEOGRAPHIC COMMA */
@@ -85894,7 +85894,7 @@ LXB_API lxb_codepoint_t lxb_encoding_multi_jis0208_map[11104] =
 
 
 /* From: 00A7; To: 0451 */
-LXB_API uint16_t lxb_encoding_multi_big5_167_1106_map[939] =
+LXB_API const uint16_t lxb_encoding_multi_big5_167_1106_map[939] =
 {
     5103, /* 00A7 (167) */
     10951, /* 00A8 (168) */
@@ -86838,7 +86838,7 @@ LXB_API uint16_t lxb_encoding_multi_big5_167_1106_map[939] =
 };
 
 /* From: 2013; To: 9FB1 */
-LXB_API uint16_t lxb_encoding_multi_big5_8211_40882_map[32671] =
+LXB_API const uint16_t lxb_encoding_multi_big5_8211_40882_map[32671] =
 {
     5046, /* 2013 (8211) */
     5048, /* 2014 (8212) */
@@ -119514,7 +119514,7 @@ LXB_API uint16_t lxb_encoding_multi_big5_8211_40882_map[32671] =
 };
 
 /* From: FA0C; To: FFED */
-LXB_API uint16_t lxb_encoding_multi_big5_64012_65518_map[1506] =
+LXB_API const uint16_t lxb_encoding_multi_big5_64012_65518_map[1506] =
 {
     11314, /* FA0C (64012) */
     14598, /* FA0D (64013) */
@@ -121025,7 +121025,7 @@ LXB_API uint16_t lxb_encoding_multi_big5_64012_65518_map[1506] =
 };
 
 /* From: 2008A; To: 2A150 */
-LXB_API uint16_t lxb_encoding_multi_big5_131210_172369_map[41159] =
+LXB_API const uint16_t lxb_encoding_multi_big5_131210_172369_map[41159] =
 {
     11207, /* 2008A (131210) */
     UINT16_MAX, /* 2008B (131211) */
@@ -162189,7 +162189,7 @@ LXB_API uint16_t lxb_encoding_multi_big5_131210_172369_map[41159] =
 };
 
 /* From: 2F894; To: 2F8A6 */
-LXB_API uint16_t lxb_encoding_multi_big5_194708_194727_map[19] =
+LXB_API const uint16_t lxb_encoding_multi_big5_194708_194727_map[19] =
 {
     19319, /* 2F894 (194708) */
     UINT16_MAX, /* 2F895 (194709) */
@@ -162214,7 +162214,7 @@ LXB_API uint16_t lxb_encoding_multi_big5_194708_194727_map[19] =
 
 
 /* From: 00A1; To: 0451 */
-LXB_API uint16_t lxb_encoding_multi_euc_kr_161_1106_map[945] =
+LXB_API const uint16_t lxb_encoding_multi_euc_kr_161_1106_map[945] =
 {
     6379, /* 00A1 (161) */
     UINT16_MAX, /* 00A2 (162) */
@@ -163164,7 +163164,7 @@ LXB_API uint16_t lxb_encoding_multi_euc_kr_161_1106_map[945] =
 };
 
 /* From: 2015; To: 33DD */
-LXB_API uint16_t lxb_encoding_multi_euc_kr_8213_13278_map[5065] =
+LXB_API const uint16_t lxb_encoding_multi_euc_kr_8213_13278_map[5065] =
 {
     6185, /* 2015 (8213) */
     UINT16_MAX, /* 2016 (8214) */
@@ -168234,7 +168234,7 @@ LXB_API uint16_t lxb_encoding_multi_euc_kr_8213_13278_map[5065] =
 };
 
 /* From: 4E00; To: D7A3 */
-LXB_API uint16_t lxb_encoding_multi_euc_kr_19968_55204_map[35236] =
+LXB_API const uint16_t lxb_encoding_multi_euc_kr_19968_55204_map[35236] =
 {
     20498, /* 4E00 (19968) */
     21038, /* 4E01 (19969) */
@@ -203475,7 +203475,7 @@ LXB_API uint16_t lxb_encoding_multi_euc_kr_19968_55204_map[35236] =
 };
 
 /* From: F900; To: FFE6 */
-LXB_API uint16_t lxb_encoding_multi_euc_kr_63744_65511_map[1767] =
+LXB_API const uint16_t lxb_encoding_multi_euc_kr_63744_65511_map[1767] =
 {
     14203, /* F900 (63744) */
     14209, /* F901 (63745) */
@@ -205248,7 +205248,7 @@ LXB_API uint16_t lxb_encoding_multi_euc_kr_63744_65511_map[1767] =
 
 
 /* From: 00A4; To: 0451 */
-LXB_API uint16_t lxb_encoding_multi_gb18030_164_1106_map[942] =
+LXB_API const uint16_t lxb_encoding_multi_gb18030_164_1106_map[942] =
 {
     6247, /* 00A4 (164) */
     UINT16_MAX, /* 00A5 (165) */
@@ -206195,7 +206195,7 @@ LXB_API uint16_t lxb_encoding_multi_gb18030_164_1106_map[942] =
 };
 
 /* From: 1E3F; To: 9FBB */
-LXB_API uint16_t lxb_encoding_multi_gb18030_7743_40892_map[33149] =
+LXB_API const uint16_t lxb_encoding_multi_gb18030_7743_40892_map[33149] =
 {
     7533, /* 1E3F (7743) */
     UINT16_MAX, /* 1E40 (7744) */
@@ -239349,7 +239349,7 @@ LXB_API uint16_t lxb_encoding_multi_gb18030_7743_40892_map[33149] =
 };
 
 /* From: E000; To: FFE5 */
-LXB_API uint16_t lxb_encoding_multi_gb18030_57344_65510_map[8166] =
+LXB_API const uint16_t lxb_encoding_multi_gb18030_57344_65510_map[8166] =
 {
     7886, /* E000 (57344) */
     7887, /* E001 (57345) */
@@ -247521,7 +247521,7 @@ LXB_API uint16_t lxb_encoding_multi_gb18030_57344_65510_map[8166] =
 
 
 /* From: 3001; To: 30FC */
-LXB_API uint16_t lxb_encoding_multi_iso_2022_jp_katakana_12289_12541_map[252] =
+LXB_API const uint16_t lxb_encoding_multi_iso_2022_jp_katakana_12289_12541_map[252] =
 {
     3, /* 3001 (12289) */
     0, /* 3002 (12290) */
@@ -247779,7 +247779,7 @@ LXB_API uint16_t lxb_encoding_multi_iso_2022_jp_katakana_12289_12541_map[252] =
 
 
 /* From: 00A1; To: 045F */
-LXB_API uint16_t lxb_encoding_multi_jis0212_161_1120_map[959] =
+LXB_API const uint16_t lxb_encoding_multi_jis0212_161_1120_map[959] =
 {
     127, /* 00A1 (161) */
     UINT16_MAX, /* 00A2 (162) */
@@ -248743,7 +248743,7 @@ LXB_API uint16_t lxb_encoding_multi_jis0212_161_1120_map[959] =
 };
 
 /* From: 2116; To: 2122 */
-LXB_API uint16_t lxb_encoding_multi_jis0212_8470_8483_map[13] =
+LXB_API const uint16_t lxb_encoding_multi_jis0212_8470_8483_map[13] =
 {
     174, /* 2116 (8470) */
     UINT16_MAX, /* 2117 (8471) */
@@ -248761,7 +248761,7 @@ LXB_API uint16_t lxb_encoding_multi_jis0212_8470_8483_map[13] =
 };
 
 /* From: 4E02; To: 9FA5 */
-LXB_API uint16_t lxb_encoding_multi_jis0212_19970_40870_map[20900] =
+LXB_API const uint16_t lxb_encoding_multi_jis0212_19970_40870_map[20900] =
 {
     1410, /* 4E02 (19970) */
     UINT16_MAX, /* 4E03 (19971) */
@@ -269666,14 +269666,14 @@ LXB_API uint16_t lxb_encoding_multi_jis0212_19970_40870_map[20900] =
 };
 
 /* From: FF5E; To: FF5E */
-LXB_API uint16_t lxb_encoding_multi_jis0212_65374_65375_map[1] =
+LXB_API const uint16_t lxb_encoding_multi_jis0212_65374_65375_map[1] =
 {
     116, /* FF5E (65374) */
 };
 
 
 /* From: 00A7; To: 0451 */
-LXB_API uint16_t lxb_encoding_multi_jis0208_167_1106_map[939] =
+LXB_API const uint16_t lxb_encoding_multi_jis0208_167_1106_map[939] =
 {
     87, /* 00A7 (167) */
     14, /* 00A8 (168) */
@@ -270617,7 +270617,7 @@ LXB_API uint16_t lxb_encoding_multi_jis0208_167_1106_map[939] =
 };
 
 /* From: 2010; To: 33CD */
-LXB_API uint16_t lxb_encoding_multi_jis0208_8208_13262_map[5054] =
+LXB_API const uint16_t lxb_encoding_multi_jis0208_8208_13262_map[5054] =
 {
     29, /* 2010 (8208) */
     UINT16_MAX, /* 2011 (8209) */
@@ -275676,7 +275676,7 @@ LXB_API uint16_t lxb_encoding_multi_jis0208_8208_13262_map[5054] =
 };
 
 /* From: 4E00; To: 9FA0 */
-LXB_API uint16_t lxb_encoding_multi_jis0208_19968_40865_map[20897] =
+LXB_API const uint16_t lxb_encoding_multi_jis0208_19968_40865_map[20897] =
 {
     1485, /* 4E00 (19968) */
     3285, /* 4E01 (19969) */
@@ -296578,7 +296578,7 @@ LXB_API uint16_t lxb_encoding_multi_jis0208_19968_40865_map[20897] =
 };
 
 /* From: F929; To: FFE5 */
-LXB_API uint16_t lxb_encoding_multi_jis0208_63785_65510_map[1725] =
+LXB_API const uint16_t lxb_encoding_multi_jis0208_63785_65510_map[1725] =
 {
     8403, /* F929 (63785) */
     UINT16_MAX, /* F92A (63786) */

@@ -231,20 +231,7 @@ ZEND_END_ARG_INFO()
 
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
-	ZEND_FE(file_get_contents, arginfo_file_get_contents_mcu)
-	ZEND_FE(fopen, arginfo_fopen_mcu)
-	ZEND_FE(fgetc, arginfo_fgetc_mcu)
-	ZEND_FE(fclose, arginfo_fclose_mcu)
-	ZEND_FE(fread, arginfo_fread_mcu)
 	ZEND_FE(time, arginfo_time_mcu)
-	ZEND_FE(microtime, arginfo_microtime_mcu)
-	ZEND_FE(hrtime, arginfo_hrtime_mcu)
-	ZEND_FE(sleep, arginfo_sleep_mcu)
-	ZEND_FE(ord, arginfo_ord_mcu)
-	ZEND_FE(chr, arginfo_chr_mcu)
-	ZEND_FE(substr, arginfo_substr_mcu)
-	ZEND_FE(str_repeat, arginfo_str_repeat_mcu)
-	ZEND_FE(is_string, arginfo_is_string_mcu)
 	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
 	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
 	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
@@ -291,6 +278,7 @@ ZEND_FUNCTION(time)
 	RETURN_LONG((zend_long)now);
 }
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 ZEND_FUNCTION(microtime)
 {
 	bool as_float = false;
@@ -382,6 +370,7 @@ ZEND_FUNCTION(is_string)
 
 	RETURN_BOOL(Z_TYPE_P(zv) == IS_STRING);
 }
+#endif
 
 ZEND_FUNCTION(mcu_epd_fill)
 {

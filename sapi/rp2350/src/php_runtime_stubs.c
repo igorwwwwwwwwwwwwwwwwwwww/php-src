@@ -7,11 +7,16 @@
 
 #include "php.h"
 #include "main/SAPI.h"
+#include "main/php_main.h"
 #include "ext/standard/basic_functions.h"
+#include "ext/standard/php_standard.h"
 #include "ext/standard/html.h"
 #include "ext/standard/info.h"
+#include "ext/random/php_random.h"
 #include "ext/random/php_random_csprng.h"
 #include "ext/random/php_random_zend_utils.h"
+#include "ext/lexbor/php_lexbor.h"
+#include "ext/uri/php_uri.h"
 #include "ext/date/php_date.h"
 #include "main/php_content_types.h"
 #include "main/php_ini.h"
@@ -27,14 +32,17 @@
 #undef vsnprintf
 #undef snprintf
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 #ifndef ZTS
 php_basic_globals basic_globals;
 #else
 int basic_globals_id;
 #endif
+#endif
 
 ZEND_API char zend_system_id[32] = "rp2350";
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 PHPAPI void php_clear_stat_cache(bool clear_realpath_cache, const char *filename, size_t filename_len)
 {
 	(void)clear_realpath_cache;
@@ -59,6 +67,7 @@ int php_get_gid_by_name(const char *name, gid_t *gid)
 	}
 	return FAILURE;
 }
+#endif
 
 PHPAPI char *php_socket_strerror(long err, char *buf, size_t bufsize)
 {
@@ -73,6 +82,7 @@ PHPAPI char *php_socket_strerror(long err, char *buf, size_t bufsize)
 	return estrdup(msg);
 }
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 PHPAPI int php_open_temporary_fd_ex(const char *dir, const char *pfx, zend_string **opened_path_p, uint32_t flags)
 {
 	(void)dir;
@@ -87,6 +97,7 @@ PHPAPI int php_open_temporary_fd(const char *dir, const char *pfx, zend_string *
 {
 	return php_open_temporary_fd_ex(dir, pfx, opened_path_p, 0);
 }
+#endif
 
 PHPAPI int php_glob(const char *pattern, int flags, int (*errfunc)(const char *, int), php_glob_t *pglob)
 {
@@ -104,6 +115,7 @@ PHPAPI void php_globfree(php_glob_t *pglob)
 	(void)pglob;
 }
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 PHP_INI_MH(OnChangeBrowscap)
 {
 	(void)entry;
@@ -114,6 +126,7 @@ PHP_INI_MH(OnChangeBrowscap)
 	(void)stage;
 	return SUCCESS;
 }
+#endif
 
 SAPI_POST_HANDLER_FUNC(rfc1867_post_handler)
 {
@@ -121,15 +134,11 @@ SAPI_POST_HANDLER_FUNC(rfc1867_post_handler)
 	(void)arg;
 }
 
-PHPAPI int php_register_internal_extensions(void)
-{
-	return SUCCESS;
-}
-
 PHPAPI void destroy_uploaded_files_hash(void) {}
 
 static uint32_t rp2350_stub_prng = 0x9e3779b9u;
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 ZEND_ATTRIBUTE_NONNULL PHPAPI zend_result php_random_bytes_ex(void *bytes, size_t size, char *errstr, size_t errstr_size)
 {
 	uint8_t *out = (uint8_t *)bytes;
@@ -160,10 +169,37 @@ ZEND_API zend_result zend_add_system_entropy(const char *module_name, const char
 	(void)size;
 	return SUCCESS;
 }
+#else
+ZEND_API zend_result zend_add_system_entropy(const char *module_name, const char *hook_name, const void *data, size_t size)
+{
+	(void)module_name;
+	(void)hook_name;
+	(void)data;
+	(void)size;
+	return SUCCESS;
+}
+#endif
+
+PHPAPI int php_register_internal_extensions(void)
+{
+#if defined(RP2350_FULL_STANDARD) && RP2350_FULL_STANDARD
+	static zend_module_entry * const rp2350_builtin_extensions[] = {
+		phpext_random_ptr,
+		phpext_lexbor_ptr,
+		phpext_uri_ptr,
+		phpext_standard_ptr,
+	};
+	return php_register_extensions(
+		rp2350_builtin_extensions,
+		(int)(sizeof(rp2350_builtin_extensions) / sizeof(rp2350_builtin_extensions[0])));
+#endif
+	return SUCCESS;
+}
 
 void zend_startup_system_id(void) {}
 void zend_finalize_system_id(void) {}
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 PHPAPI zend_string *php_escape_html_entities_ex(const unsigned char *old, size_t oldlen, int all, int flags, const char *hint_charset, bool double_encode, bool quiet)
 {
 	(void)all;
@@ -173,6 +209,7 @@ PHPAPI zend_string *php_escape_html_entities_ex(const unsigned char *old, size_t
 	(void)quiet;
 	return zend_string_init((const char *)old, oldlen, 0);
 }
+#endif
 
 PHPAPI zend_string *php_format_date(const char *format, size_t format_len, time_t ts, bool localtime)
 {
@@ -183,6 +220,31 @@ PHPAPI zend_string *php_format_date(const char *format, size_t format_len, time_
 	return zend_string_init("1970-01-01 00:00:00 UTC", sizeof("1970-01-01 00:00:00 UTC") - 1, 0);
 }
 
+PHPAPI time_t php_time(void)
+{
+	return time(NULL);
+}
+
+timelib_tzinfo *get_timezone_info(void)
+{
+	return NULL;
+}
+
+timelib_time_offset *timelib_get_time_zone_info(timelib_sll ts, timelib_tzinfo *tz)
+{
+	static timelib_time_offset offset;
+	(void)ts;
+	(void)tz;
+	memset(&offset, 0, sizeof(offset));
+	return &offset;
+}
+
+void timelib_time_offset_dtor(timelib_time_offset *t)
+{
+	(void)t;
+}
+
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 PHPAPI void php_call_shutdown_functions(void) {}
 PHPAPI void php_free_shutdown_functions(void) {}
 
@@ -201,6 +263,7 @@ PHPAPI void php_info_print_box_end(void) {}
 PHPAPI void php_info_print_hr(void) {}
 PHPAPI void php_info_print_module(zend_module_entry *module) { (void)module; }
 PHPAPI zend_string *php_get_uname(char mode) { (void)mode; return zend_string_init("rp2350", sizeof("rp2350") - 1, 0); }
+#endif
 
 PHPAPI HashTable *php_stream_xport_get_hash(void)
 {

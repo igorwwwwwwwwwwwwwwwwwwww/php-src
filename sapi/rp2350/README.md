@@ -170,14 +170,21 @@ x/16i $pc-16
 
 Allocator notes:
 - Keep Zend allocator enabled (`USE_ZEND_ALLOC` default path).
-- `mmap()` is provided by `rp2350_mmap.c` and allocates from PSRAM.
-- Global libc heap redirection (`_sbrk` into PSRAM) is intentionally not used.
+- `mmap()` is provided by `rp2350_mmap.c` and allocates from a dedicated PSRAM arena.
+- newlib libc heap growth (`_sbrk`) is redirected into a separate PSRAM window.
 
 ## Known-good now
 
 - Build from `sapi/rp2350/build_badger`
 - Flash with `picotool` or `/Volumes/RP2350`
 - UART shows firmware boot lines and script output (`tick` loop)
+
+## TODO
+
+- Replace bring-up PSRAM persistent bump allocator with a proper PSRAM heap allocator:
+  - Keep a small startup-persistent arena for module/arginfo/class metadata.
+  - Add real `malloc/free/realloc` semantics in PSRAM for long-lived runtime allocations.
+  - Route only truly persistent allocations to the persistent arena.
 
 ## Important constraints
 

@@ -76,9 +76,52 @@ list(REMOVE_ITEM ZEND_ENGINE_SOURCES
   "${PHP_SRC_ROOT}/Zend/zend_system_id.c"
 )
 
+file(GLOB RP2350_STANDARD_SOURCES "${PHP_SRC_ROOT}/ext/standard/*.c")
+list(REMOVE_ITEM RP2350_STANDARD_SOURCES
+  "${PHP_SRC_ROOT}/ext/standard/dns_win32.c"
+  "${PHP_SRC_ROOT}/ext/standard/dns.c"
+)
+file(GLOB RP2350_RANDOM_SOURCES "${PHP_SRC_ROOT}/ext/random/*.c")
+file(GLOB RP2350_URI_SOURCES "${PHP_SRC_ROOT}/ext/uri/*.c")
+file(GLOB RP2350_URIPARSER_SOURCES "${PHP_SRC_ROOT}/ext/uri/uriparser/src/*.c")
+set(RP2350_LEXBOR_SOURCES
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/array_obj.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/array.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/avl.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/bst.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/conv.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/diyfp.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/dobject.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/dtoa.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/hash.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/mem.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/mraw.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/plog.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/print.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/serialize.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/shs.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/str.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/strtod.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/utils.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/encoding/decode.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/encoding/encode.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/encoding/encoding.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/encoding/multi.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/encoding/range.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/encoding/res.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/encoding/single.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/ports/posix/lexbor/core/memory.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/punycode/punycode.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/unicode/idna.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/unicode/unicode.c
+  ${PHP_SRC_ROOT}/ext/lexbor/lexbor/url/url.c
+)
+
 add_executable(php_mcu_firmware
   src/main.c
   src/fault_handlers.c
+  src/rp2350_dns_stubs.c
+  src/rp2350_lexbor_stubs.c
   src/rp2350_vfs_syscalls.c
   rp2350_rtc.c
   rp2350_epd.cpp
@@ -90,6 +133,7 @@ add_executable(php_mcu_firmware
   rp2350_zend_optimizer_stub.c
   rp2350_posix_stubs.c
   rp2350_mmap.c
+  rp2350_sbrk_psram.c
   rp2350_transport_pico.c
   ${PHP_SRC_ROOT}/main/streams/cast.c
   ${PHP_SRC_ROOT}/main/streams/filter.c
@@ -101,20 +145,27 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/streams/userspace.c
   ${PHP_SRC_ROOT}/main/SAPI.c
   ${PHP_SRC_ROOT}/main/main.c
+  src/rp2350_network_stubs.c
+  ${PHP_SRC_ROOT}/main/getopt.c
+  ${PHP_SRC_ROOT}/main/explicit_bzero.c
+  ${PHP_SRC_ROOT}/main/safe_bcmp.c
   ${PHP_SRC_ROOT}/main/output.c
   ${PHP_SRC_ROOT}/main/php_content_types.c
   ${PHP_SRC_ROOT}/main/php_ini.c
   ${PHP_SRC_ROOT}/main/php_ticks.c
   ${PHP_SRC_ROOT}/main/php_variables.c
   ${PHP_SRC_ROOT}/main/fopen_wrappers.c
+  ${PHP_SRC_ROOT}/main/php_open_temporary_file.c
   ${PHP_SRC_ROOT}/main/strlcat.c
   ${PHP_SRC_ROOT}/main/snprintf.c
   ${PHP_SRC_ROOT}/main/spprintf.c
   ${PHP_SRC_ROOT}/main/strlcpy.c
-  ${PHP_SRC_ROOT}/ext/standard/file.c
-  ${PHP_SRC_ROOT}/ext/standard/head.c
-  ${PHP_SRC_ROOT}/ext/standard/string.c
-  ${PHP_SRC_ROOT}/ext/standard/url.c
+  ${RP2350_STANDARD_SOURCES}
+  ${PHP_SRC_ROOT}/ext/standard/libavifinfo/avifinfo.c
+  ${RP2350_RANDOM_SOURCES}
+  ${RP2350_URI_SOURCES}
+  ${RP2350_URIPARSER_SOURCES}
+  ${RP2350_LEXBOR_SOURCES}
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
 )
@@ -127,6 +178,8 @@ target_include_directories(php_mcu_firmware PRIVATE
   ${PHP_SRC_ROOT}/main
   ${PHP_SRC_ROOT}/TSRM
   ${PHP_SRC_ROOT}/Zend
+  ${PHP_SRC_ROOT}/ext/lexbor
+  ${PHP_SRC_ROOT}/ext/uri/uriparser/include
 )
 
 target_compile_definitions(php_mcu_firmware PRIVATE
@@ -135,9 +188,17 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   RP2350_WAIT_FOR_USB_SERIAL_MS=${RP2350_WAIT_FOR_USB_SERIAL_MS}
   HAVE_INT32_T=1
   HAVE_UINT32_T=1
-  # Give pico-sdk's newlib heap enough room for USB TinyUSB init, alarm pools,
-  # mutexes etc.  The default 2 KB is too small when the full Zend BSS is present.
-  PICO_HEAP_SIZE=65536
+  _POSIX_TIMERS=1
+  _POSIX_MONOTONIC_CLOCK=1
+  HAVE_LEXBOR=1
+  LEXBOR_VERSION=\"2.5.0\"
+  URI_ENABLE_ANSI=1
+  URI_NO_UNICODE=1
+  URI_STATIC_BUILD=1
+  RP2350_FULL_STANDARD=1
+  PICO_MALLOC_PANIC=0
+  # Keep SRAM .heap modest; newlib sbrk is redirected to a PSRAM window.
+  PICO_HEAP_SIZE=16384
 )
 
 target_link_libraries(php_mcu_firmware
