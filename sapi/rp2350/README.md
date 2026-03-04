@@ -9,7 +9,7 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 - PSRAM hardware init (QPI/XIP on CS1) is working
 - Zend allocator now uses a PSRAM-backed `mmap()` arena (`rp2350_mmap.c`)
 - POSIX shims stub out unsupported host APIs
-- Single builtin: `mcu_sleep_ms(int $ms)`
+- MCU builtins include button/LED helpers and EPD drawing helpers
 - Zend observer runtime is disabled during bring-up to reduce crash surface
 - Embedded fake filesystem is enabled for script loading (`/main.php`, `/lib.php`, etc)
 - Board I/O via overridable weak symbols:
@@ -185,6 +185,10 @@ Allocator notes:
   - Keep a small startup-persistent arena for module/arginfo/class metadata.
   - Add real `malloc/free/realloc` semantics in PSRAM for long-lived runtime allocations.
   - Route only truly persistent allocations to the persistent arena.
+- Refine button interrupt wait/scheduler path:
+  - Current `mcu_button_wait()` is semaphore+IRQ wake with timeout and works for responsiveness.
+  - Revisit precise 1 Hz scheduling strategy (the prior `hrtime`/deadline variant caused stalls on target).
+  - Add low-level button IRQ diagnostics (`irq count`, `wake count`, `timeout count`) to aid tuning.
 
 ## Important constraints
 

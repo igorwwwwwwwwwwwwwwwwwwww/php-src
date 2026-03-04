@@ -10,6 +10,7 @@
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
+#include "pico/sem.h"
 #include "hardware/sync.h"
 
 #include "Zend/zend.h"
@@ -45,6 +46,7 @@ static char rp2350_stream_open_last_path[96];
 static const char *rp2350_stream_open_last_reason = "none";
 static bool s_buttons_init = false;
 static bool s_leds_init = false;
+static semaphore_t s_button_sem;
 static volatile uint32_t s_button_state_mask = 0;
 static volatile uint32_t s_button_irq_pending_mask = 0;
 static volatile uint32_t s_button_irq_generation = 0;
@@ -124,7 +126,6 @@ static void rp2350_vfs_closer(void *handle)
 	free(handle);
 }
 
-ZEND_FUNCTION(mcu_sleep_ms);
 ZEND_FUNCTION(mcu_button_pressed);
 ZEND_FUNCTION(mcu_button_state_mask);
 ZEND_FUNCTION(mcu_button_wait);
@@ -135,10 +136,6 @@ ZEND_FUNCTION(mcu_epd_set_pixel);
 ZEND_FUNCTION(mcu_epd_update);
 ZEND_FUNCTION(mcu_epd_render);
 PHP_MINIT_FUNCTION(rp2350_mcu);
-
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep_ms, 0, 1, _IS_BOOL, 0)
-	ZEND_ARG_TYPE_INFO(0, ms, IS_LONG, 0)
-ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, button, IS_LONG, 1)
@@ -182,7 +179,6 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_render, 0, 3, _IS_BOOL, 
 ZEND_END_ARG_INFO()
 
 static const zend_function_entry rp2350_mcu_functions[] = {
-	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
 	ZEND_FE(mcu_button_pressed, arginfo_mcu_button_pressed)
 	ZEND_FE(mcu_button_state_mask, arginfo_mcu_button_state_mask)
 	ZEND_FE(mcu_button_wait, arginfo_mcu_button_wait)
@@ -207,21 +203,6 @@ static zend_module_entry rp2350_mcu_module_entry = {
 	NO_VERSION_YET,
 	STANDARD_MODULE_PROPERTIES
 };
-
-ZEND_FUNCTION(mcu_sleep_ms)
-{
-	zend_long ms = 0;
-
-	ZEND_PARSE_PARAMETERS_START(1, 1)
-		Z_PARAM_LONG(ms)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (ms < 0) {
-		ms = 0;
-	}
-	sleep_ms((uint32_t) ms);
-	RETURN_TRUE;
-}
 
 static bool rp2350_button_gpio_is_pressed(uint32_t gpio)
 {
@@ -312,6 +293,7 @@ static void rp2350_button_gpio_irq(uint gpio, uint32_t events)
 	}
 	s_button_irq_pending_mask |= (1u << id);
 	s_button_irq_generation++;
+	sem_release(&s_button_sem);
 
 	if (rp2350_zend_started) {
 		zend_atomic_bool_store_ex(&EG(vm_interrupt), true);
@@ -361,6 +343,7 @@ static void rp2350_buttons_init(void)
 		}
 	}
 
+	sem_init(&s_button_sem, 0, 255);
 	s_buttons_init = true;
 	s_button_irq_pending_mask = 0xffffffffu; /* force initial LED sync on first interrupt check */
 }
@@ -414,8 +397,7 @@ ZEND_FUNCTION(mcu_button_state_mask)
 ZEND_FUNCTION(mcu_button_wait)
 {
 	zend_long timeout_ms = 0;
-	uint32_t start_us;
-	uint32_t baseline_generation;
+	bool ok;
 
 	ZEND_PARSE_PARAMETERS_START(1, 1)
 		Z_PARAM_LONG(timeout_ms)
@@ -427,29 +409,20 @@ ZEND_FUNCTION(mcu_button_wait)
 
 	rp2350_buttons_init();
 
+	if (timeout_ms == 0) {
+		RETURN_FALSE;
+	}
+
+	ok = sem_acquire_timeout_ms(&s_button_sem, (uint32_t)timeout_ms);
+	if (!ok) {
+		RETURN_FALSE;
+	}
+
 	{
 		uint32_t irq_state = save_and_disable_interrupts();
-		baseline_generation = s_button_irq_generation;
-		restore_interrupts(irq_state);
-	}
-	start_us = time_us_32();
-
-	for (;;) {
-		uint32_t irq_state = save_and_disable_interrupts();
-		uint32_t generation = s_button_irq_generation;
 		uint32_t mask = s_button_state_mask;
 		restore_interrupts(irq_state);
-
-		if (generation != baseline_generation) {
-			RETURN_LONG((zend_long)mask);
-		}
-		if (timeout_ms == 0) {
-			RETURN_FALSE;
-		}
-		if ((time_us_32() - start_us) >= (uint32_t)(timeout_ms * 1000)) {
-			RETURN_FALSE;
-		}
-		sleep_ms(1);
+		RETURN_LONG((zend_long)mask);
 	}
 }
 
