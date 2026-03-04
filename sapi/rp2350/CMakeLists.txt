@@ -121,7 +121,6 @@ add_executable(php_mcu_firmware
   src/main.c
   src/fault_handlers.c
   src/rp2350_dns_stubs.c
-  src/rp2350_lexbor_stubs.c
   src/rp2350_vfs_syscalls.c
   rp2350_rtc.c
   rp2350_epd.cpp
@@ -165,6 +164,7 @@ add_executable(php_mcu_firmware
   ${RP2350_RANDOM_SOURCES}
   ${RP2350_URI_SOURCES}
   ${RP2350_URIPARSER_SOURCES}
+  ${PHP_SRC_ROOT}/ext/lexbor/php_lexbor.c
   ${RP2350_LEXBOR_SOURCES}
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
