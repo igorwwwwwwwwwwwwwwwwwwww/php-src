@@ -118,20 +118,6 @@ static void rp2350_vfs_closer(void *handle)
 }
 
 ZEND_FUNCTION(mcu_sleep_ms);
-ZEND_FUNCTION(file_get_contents);
-ZEND_FUNCTION(fopen);
-ZEND_FUNCTION(fgetc);
-ZEND_FUNCTION(fclose);
-ZEND_FUNCTION(fread);
-ZEND_FUNCTION(time);
-ZEND_FUNCTION(microtime);
-ZEND_FUNCTION(hrtime);
-ZEND_FUNCTION(sleep);
-ZEND_FUNCTION(ord);
-ZEND_FUNCTION(chr);
-ZEND_FUNCTION(substr);
-ZEND_FUNCTION(str_repeat);
-ZEND_FUNCTION(is_string);
 ZEND_FUNCTION(mcu_epd_fill);
 ZEND_FUNCTION(mcu_epd_clear);
 ZEND_FUNCTION(mcu_epd_set_pixel);
@@ -140,68 +126,6 @@ ZEND_FUNCTION(mcu_epd_render);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep_ms, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, ms, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_file_get_contents_mcu, 0, 0, 1)
-	ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_fopen_mcu, 0, 0, 2)
-	ZEND_ARG_TYPE_INFO(0, filename, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, mode, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, use_include_path, _IS_BOOL, 1)
-	ZEND_ARG_INFO(0, context)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_fgetc_mcu, 0, 0, 1)
-	ZEND_ARG_INFO(0, stream)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_fclose_mcu, 0, 0, 1)
-	ZEND_ARG_INFO(0, stream)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_fread_mcu, 0, 0, 2)
-	ZEND_ARG_INFO(0, stream)
-	ZEND_ARG_TYPE_INFO(0, length, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_time_mcu, 0, 0, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_microtime_mcu, 0, 0, MAY_BE_STRING|MAY_BE_DOUBLE)
-	ZEND_ARG_TYPE_INFO(0, as_float, _IS_BOOL, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_hrtime_mcu, 0, 0, MAY_BE_ARRAY|MAY_BE_LONG|MAY_BE_DOUBLE|MAY_BE_FALSE)
-	ZEND_ARG_TYPE_INFO(0, as_number, _IS_BOOL, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_sleep_mcu, 0, 1, IS_LONG, 0)
-	ZEND_ARG_TYPE_INFO(0, seconds, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_ord_mcu, 0, 0, 1)
-	ZEND_ARG_TYPE_INFO(0, str, IS_STRING, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_chr_mcu, 0, 0, 1)
-	ZEND_ARG_TYPE_INFO(0, codepoint, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_substr_mcu, 0, 0, 2)
-	ZEND_ARG_TYPE_INFO(0, str, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, offset, IS_LONG, 0)
-	ZEND_ARG_TYPE_INFO(0, length, IS_LONG, 1)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_str_repeat_mcu, 0, 0, 2)
-	ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, multiplier, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_INFO_EX(arginfo_is_string_mcu, 0, 0, 1)
-	ZEND_ARG_INFO(0, value)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_fill, 0, 1, _IS_BOOL, 0)
@@ -231,7 +155,6 @@ ZEND_END_ARG_INFO()
 
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
-	ZEND_FE(time, arginfo_time_mcu)
 	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
 	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
 	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
@@ -267,110 +190,6 @@ ZEND_FUNCTION(mcu_sleep_ms)
 	sleep_ms((uint32_t) ms);
 	RETURN_TRUE;
 }
-
-ZEND_FUNCTION(time)
-{
-	time_t now;
-
-	ZEND_PARSE_PARAMETERS_NONE();
-
-	now = time(NULL);
-	RETURN_LONG((zend_long)now);
-}
-
-#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
-ZEND_FUNCTION(microtime)
-{
-	bool as_float = false;
-	struct timeval tv;
-	double value;
-	char out[48];
-	int n;
-
-	ZEND_PARSE_PARAMETERS_START(0, 1)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_BOOL(as_float)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (gettimeofday(&tv, NULL) != 0) {
-		tv.tv_sec = 0;
-		tv.tv_usec = 0;
-	}
-
-	if (as_float) {
-		value = (double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0);
-		RETURN_DOUBLE(value);
-	}
-
-	n = snprintf(out, sizeof(out), "0.%06ld %ld", (long)tv.tv_usec, (long)tv.tv_sec);
-	if (n < 0) {
-		RETURN_STRING("0.000000 0");
-	}
-	RETURN_STRINGL(out, (size_t)n);
-}
-
-ZEND_FUNCTION(hrtime)
-{
-	bool as_number = false;
-	uint64_t total_ns;
-	uint64_t sec;
-	uint64_t nsec;
-
-	ZEND_PARSE_PARAMETERS_START(0, 1)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_BOOL(as_number)
-	ZEND_PARSE_PARAMETERS_END();
-
-	total_ns = to_us_since_boot(get_absolute_time()) * 1000ull;
-	sec = total_ns / 1000000000ull;
-	nsec = total_ns % 1000000000ull;
-
-	if (as_number) {
-#if SIZEOF_ZEND_LONG >= 8
-		RETURN_LONG((zend_long)total_ns);
-#else
-		RETURN_DOUBLE((double)total_ns);
-#endif
-	}
-
-	array_init(return_value);
-	add_next_index_long(return_value, (zend_long)sec);
-	add_next_index_long(return_value, (zend_long)nsec);
-}
-
-ZEND_FUNCTION(sleep)
-{
-	zend_long seconds = 0;
-
-	ZEND_PARSE_PARAMETERS_START(1, 1)
-		Z_PARAM_LONG(seconds)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (seconds > 0) {
-		sleep_ms((uint32_t)(seconds * 1000));
-	}
-	RETURN_LONG(0);
-}
-
-ZEND_FUNCTION(ord);
-
-ZEND_FUNCTION(chr);
-
-ZEND_FUNCTION(substr);
-
-ZEND_FUNCTION(str_repeat);
-
-ZEND_FUNCTION(is_string)
-{
-	zval *zv = NULL;
-
-	ZEND_PARSE_PARAMETERS_START(1, 1)
-		Z_PARAM_ZVAL(zv)
-	ZEND_PARSE_PARAMETERS_END();
-
-	RETURN_BOOL(Z_TYPE_P(zv) == IS_STRING);
-}
-#endif
 
 ZEND_FUNCTION(mcu_epd_fill)
 {

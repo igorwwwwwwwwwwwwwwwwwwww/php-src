@@ -84,6 +84,19 @@ list(REMOVE_ITEM RP2350_STANDARD_SOURCES
 file(GLOB RP2350_RANDOM_SOURCES "${PHP_SRC_ROOT}/ext/random/*.c")
 file(GLOB RP2350_URI_SOURCES "${PHP_SRC_ROOT}/ext/uri/*.c")
 file(GLOB RP2350_URIPARSER_SOURCES "${PHP_SRC_ROOT}/ext/uri/uriparser/src/*.c")
+set(RP2350_DATE_SOURCES
+  ${PHP_SRC_ROOT}/ext/date/php_date.c
+  ${PHP_SRC_ROOT}/ext/date/lib/astro.c
+  ${PHP_SRC_ROOT}/ext/date/lib/dow.c
+  ${PHP_SRC_ROOT}/ext/date/lib/parse_date.c
+  ${PHP_SRC_ROOT}/ext/date/lib/parse_tz.c
+  ${PHP_SRC_ROOT}/ext/date/lib/parse_posix.c
+  ${PHP_SRC_ROOT}/ext/date/lib/timelib.c
+  ${PHP_SRC_ROOT}/ext/date/lib/tm2unixtime.c
+  ${PHP_SRC_ROOT}/ext/date/lib/unixtime2tm.c
+  ${PHP_SRC_ROOT}/ext/date/lib/parse_iso_intervals.c
+  ${PHP_SRC_ROOT}/ext/date/lib/interval.c
+)
 set(RP2350_LEXBOR_SOURCES
   ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/array_obj.c
   ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/array.c
@@ -164,6 +177,7 @@ add_executable(php_mcu_firmware
   ${RP2350_RANDOM_SOURCES}
   ${RP2350_URI_SOURCES}
   ${RP2350_URIPARSER_SOURCES}
+  ${RP2350_DATE_SOURCES}
   ${PHP_SRC_ROOT}/ext/lexbor/php_lexbor.c
   ${RP2350_LEXBOR_SOURCES}
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
@@ -178,6 +192,8 @@ target_include_directories(php_mcu_firmware PRIVATE
   ${PHP_SRC_ROOT}/main
   ${PHP_SRC_ROOT}/TSRM
   ${PHP_SRC_ROOT}/Zend
+  ${PHP_SRC_ROOT}/ext/date
+  ${PHP_SRC_ROOT}/ext/date/lib
   ${PHP_SRC_ROOT}/ext/lexbor
   ${PHP_SRC_ROOT}/ext/uri/uriparser/include
 )
@@ -190,6 +206,7 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   HAVE_UINT32_T=1
   _POSIX_TIMERS=1
   _POSIX_MONOTONIC_CLOCK=1
+  HAVE_TIMELIB_CONFIG_H=1
   HAVE_LEXBOR=1
   LEXBOR_VERSION=\"2.5.0\"
   URI_ENABLE_ANSI=1

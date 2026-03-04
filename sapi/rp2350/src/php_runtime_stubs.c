@@ -187,6 +187,7 @@ PHPAPI int php_register_internal_extensions(void)
 		phpext_random_ptr,
 		phpext_lexbor_ptr,
 		phpext_uri_ptr,
+		phpext_date_ptr,
 		phpext_standard_ptr,
 	};
 	return php_register_extensions(
@@ -211,6 +212,7 @@ PHPAPI zend_string *php_escape_html_entities_ex(const unsigned char *old, size_t
 }
 #endif
 
+#if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 PHPAPI zend_string *php_format_date(const char *format, size_t format_len, time_t ts, bool localtime)
 {
 	(void)format;
@@ -243,6 +245,7 @@ void timelib_time_offset_dtor(timelib_time_offset *t)
 {
 	(void)t;
 }
+#endif
 
 #if !defined(RP2350_FULL_STANDARD) || !RP2350_FULL_STANDARD
 PHPAPI void php_call_shutdown_functions(void) {}
