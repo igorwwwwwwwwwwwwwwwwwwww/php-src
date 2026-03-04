@@ -2,7 +2,29 @@
 require '/lib.php';
 require '/logo.php';
 
-function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging) {
+function wifi_status_label($status) {
+    if ($status === MCU_WIFI_LINK_UP) {
+        return 'UP';
+    }
+    if ($status === MCU_WIFI_LINK_NOIP) {
+        return 'NOIP';
+    }
+    if ($status === MCU_WIFI_LINK_JOIN) {
+        return 'JOIN';
+    }
+    if ($status === MCU_WIFI_LINK_BADAUTH) {
+        return 'AUTH';
+    }
+    if ($status === MCU_WIFI_LINK_NONET) {
+        return 'NONET';
+    }
+    if ($status === MCU_WIFI_LINK_FAIL) {
+        return 'FAIL';
+    }
+    return 'DOWN';
+}
+
+function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip) {
     if ($mode_logo) {
         $logo = php_logo_data();
         if ($logo !== false) {
@@ -22,6 +44,11 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging) {
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 80, (string)$batt_pct, 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 118, 80, $usb_connected ? 'USB' : 'BAT', 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 168, 80, $charging ? 'CHG' : 'IDLE', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 104, 'WIFI', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 104, wifi_status_label($wifi_status), 2, 2);
+    if (is_string($wifi_ip) && $wifi_ip !== '') {
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 136, 104, $wifi_ip, 1, 1);
+    }
     print "epd:render:text\n";
     mcu_epd_render($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT);
 }
@@ -38,6 +65,8 @@ $usb_connected = mcu_usb_connected();
 $batt_pct = mcu_battery_level_from_voltage($batt_v);
 $prev_batt_pct = $batt_pct;
 $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
+$wifi_status = MCU_WIFI_LINK_DOWN;
+$wifi_ip = null;
 
 $wifi_ssid = getenv('WIFI_SSID');
 $wifi_pass = getenv('WIFI_PASS');
@@ -47,7 +76,8 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
     print "wifi:ok:";
     print $wifi_ok ? "1" : "0";
     print " status:";
-    print mcu_wifi_status();
+    $wifi_status = mcu_wifi_status();
+    print $wifi_status;
     print " ip:";
     $wifi_ip = mcu_wifi_ip();
     print is_string($wifi_ip) ? $wifi_ip : "none";
@@ -96,7 +126,9 @@ while (true) {
             $batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
             $batt_pct = mcu_battery_level_from_voltage($batt_v);
             $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
-            redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging);
+            $wifi_status = mcu_wifi_status();
+            $wifi_ip = mcu_wifi_ip();
+            redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
             $needs_redraw = false;
         }
         continue;
@@ -114,6 +146,8 @@ while (true) {
     $usb_connected = mcu_usb_connected();
     $batt_pct = mcu_battery_level_from_voltage($batt_v);
     $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
+    $wifi_status = mcu_wifi_status();
+    $wifi_ip = mcu_wifi_ip();
     if ($batt_pct !== $prev_batt_pct) {
         $needs_redraw = true;
         $prev_batt_pct = $batt_pct;
@@ -123,7 +157,7 @@ while (true) {
         $batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
         $batt_pct = mcu_battery_level_from_voltage($batt_v);
         $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
-        redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging);
+        redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
         $needs_redraw = false;
     }
 
@@ -152,5 +186,9 @@ while (true) {
     print $usb_connected ? "1" : "0";
     print " chg:";
     print $charging ? "1" : "0";
+    print " wifi:";
+    print wifi_status_label($wifi_status);
+    print " ip:";
+    print is_string($wifi_ip) ? $wifi_ip : "none";
     print "\n";
 }
