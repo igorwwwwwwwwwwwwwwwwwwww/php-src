@@ -23,6 +23,7 @@
 #include "lwip/udp.h"
 #include "lwip/pbuf.h"
 #include "lwip/err.h"
+#include "lwip/apps/http_client.h"
 
 #include "Zend/zend.h"
 #include "Zend/zend_API.h"
@@ -751,20 +752,76 @@ static bool rp2350_parse_http_url(const char *url, char *host, size_t host_size,
 	return true;
 }
 
+typedef struct {
+	char *buf;
+	size_t len;
+	size_t cap;
+	volatile bool done;
+	bool truncated;
+	httpc_result_t result;
+	err_t lwip_err;
+	u32_t srv_res;
+} rp2350_httpc_ctx_t;
+
+static err_t rp2350_httpc_recv_cb(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t err)
+{
+	rp2350_httpc_ctx_t *ctx = (rp2350_httpc_ctx_t *)arg;
+	size_t avail;
+	size_t take;
+
+	(void)pcb;
+	if (!ctx) {
+		if (p) {
+			pbuf_free(p);
+		}
+		return ERR_OK;
+	}
+	if (err != ERR_OK) {
+		if (p) {
+			pbuf_free(p);
+		}
+		return err;
+	}
+	if (!p) {
+		return ERR_OK;
+	}
+
+	avail = (ctx->len < ctx->cap) ? (ctx->cap - ctx->len) : 0;
+	take = (p->tot_len < avail) ? (size_t)p->tot_len : avail;
+	if (take < (size_t)p->tot_len) {
+		ctx->truncated = true;
+	}
+	if (take > 0) {
+		pbuf_copy_partial(p, ctx->buf + ctx->len, (u16_t)take, 0);
+		ctx->len += take;
+	}
+	pbuf_free(p);
+	return ERR_OK;
+}
+
+static void rp2350_httpc_result_cb(void *arg, httpc_result_t httpc_result, u32_t rx_content_len, u32_t srv_res, err_t err)
+{
+	rp2350_httpc_ctx_t *ctx = (rp2350_httpc_ctx_t *)arg;
+	(void)rx_content_len;
+	if (!ctx) {
+		return;
+	}
+	ctx->result = httpc_result;
+	ctx->lwip_err = err;
+	ctx->srv_res = srv_res;
+	ctx->done = true;
+}
+
 static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t max_read, char **body_out, size_t *body_len_out)
 {
 	char host[96];
 	u16_t port;
 	const char *path;
-	char *request = NULL;
-	size_t request_cap;
-	size_t request_len;
-	char *response = NULL;
-	size_t response_len = 0;
-	size_t i;
-	size_t body_off = 0;
-	size_t body_len;
-	char *body = NULL;
+	rp2350_httpc_ctx_t ctx;
+	httpc_connection_t settings;
+	httpc_state_t *conn = NULL;
+	err_t start_err;
+	absolute_time_t deadline;
 
 	*body_out = NULL;
 	*body_len_out = 0;
@@ -773,52 +830,41 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 		return false;
 	}
 
-	request_cap = strlen(path) + strlen(host) + 96;
-	request = (char *)malloc(request_cap);
-	if (!request) {
+	memset(&ctx, 0, sizeof(ctx));
+	ctx.cap = max_read;
+	ctx.buf = (char *)malloc(max_read + 1);
+	if (!ctx.buf) {
 		return false;
 	}
-	request_len = (size_t)snprintf(
-		request,
-		request_cap,
-		"GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
-		path,
-		host
-	);
 
-	if (!rp2350_net_tcp_request(host, port, request, request_len, timeout_ms, max_read, &response, &response_len)) {
-		free(request);
+	memset(&settings, 0, sizeof(settings));
+	settings.result_fn = rp2350_httpc_result_cb;
+
+	cyw43_arch_lwip_begin();
+	start_err = httpc_get_file_dns(host, port, path, &settings, rp2350_httpc_recv_cb, &ctx, &conn);
+	cyw43_arch_lwip_end();
+	if (start_err != ERR_OK) {
+		free(ctx.buf);
 		return false;
 	}
-	free(request);
 
-	for (i = 0; i + 3 < response_len; i++) {
-		if (response[i] == '\r' && response[i + 1] == '\n' && response[i + 2] == '\r' && response[i + 3] == '\n') {
-			body_off = i + 4;
-			break;
+	deadline = make_timeout_time_ms(timeout_ms);
+	while (!ctx.done) {
+		if (time_reached(deadline)) {
+			free(ctx.buf);
+			return false;
 		}
-	}
-	if (body_off == 0) {
-		for (i = 0; i + 1 < response_len; i++) {
-			if (response[i] == '\n' && response[i + 1] == '\n') {
-				body_off = i + 2;
-				break;
-			}
-		}
+		sleep_ms(1);
 	}
 
-	body_len = (body_off < response_len) ? (response_len - body_off) : response_len;
-	body = (char *)malloc(body_len + 1);
-	if (!body) {
-		free(response);
+	if (ctx.result != HTTPC_RESULT_OK || ctx.lwip_err != ERR_OK) {
+		free(ctx.buf);
 		return false;
 	}
-	memcpy(body, response + body_off, body_len);
-	body[body_len] = '\0';
-	free(response);
 
-	*body_out = body;
-	*body_len_out = body_len;
+	ctx.buf[ctx.len] = '\0';
+	*body_out = ctx.buf;
+	*body_len_out = ctx.len;
 	return true;
 }
 

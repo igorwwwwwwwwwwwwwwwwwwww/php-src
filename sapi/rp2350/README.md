@@ -142,7 +142,7 @@ Current limitation:
 - This is connection/status/IP foundation only.
 - PHP stream/socket transport is still mostly stubbed in `src/rp2350_network_stubs.c`, so `ext/curl` and generic network streams are not wired yet.
 - TCP/UDP helpers above use lwIP raw APIs directly (under `NO_SYS=1`) and are intended as a bring-up path, not a full PHP sockets layer.
-- `http://` script loading is now handled by the RP2350 Zend stream-open hook (HTTP/1.0 GET over lwIP raw TCP, response body only, no TLS/chunked/redirect support yet).
+- `http://` script loading is handled by the RP2350 Zend stream-open hook using lwIP HTTP client (`apps/http/http_client.c`), HTTP only (no TLS yet).
 
 ## SWD debug (OpenOCD + GDB)
 

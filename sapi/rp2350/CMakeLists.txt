@@ -183,6 +183,7 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/SAPI.c
   ${PHP_SRC_ROOT}/main/main.c
   src/rp2350_network_stubs.c
+  ${PICO_SDK_PATH}/lib/lwip/src/apps/http/http_client.c
   ${PHP_SRC_ROOT}/main/getopt.c
   ${PHP_SRC_ROOT}/main/explicit_bzero.c
   ${PHP_SRC_ROOT}/main/safe_bcmp.c
