@@ -82,6 +82,20 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
     $wifi_ip = mcu_wifi_ip();
     print is_string($wifi_ip) ? $wifi_ip : "none";
     print "\n";
+
+    if ($wifi_ok && $wifi_status === MCU_WIFI_LINK_UP) {
+        $req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
+        $resp = mcu_tcp_request('example.com', 80, $req, 6000, 512);
+        if ($resp === false) {
+            print "tcp:req:fail\n";
+        } else {
+            print "tcp:req:ok len:";
+            print strlen($resp);
+            print " head:";
+            print str_replace("\r", "", substr($resp, 0, 32));
+            print "\n";
+        }
+    }
 }
 
 while (true) {

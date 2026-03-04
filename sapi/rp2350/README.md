@@ -126,6 +126,8 @@ Exposed PHP APIs:
 - `mcu_wifi_disconnect(): bool`
 - `mcu_wifi_status(): int`
 - `mcu_wifi_ip(): string|false`
+- `mcu_tcp_request(string $host, int $port, string $payload, int $timeout_ms = 5000, int $max_read = 4096): string|false`
+- `mcu_udp_sendto(string $host, int $port, string $payload, int $timeout_ms = 2000): bool`
 
 Wi-Fi status constants:
 - `MCU_WIFI_LINK_DOWN`
@@ -139,6 +141,7 @@ Wi-Fi status constants:
 Current limitation:
 - This is connection/status/IP foundation only.
 - PHP stream/socket transport is still mostly stubbed in `src/rp2350_network_stubs.c`, so `ext/curl` and generic network streams are not wired yet.
+- TCP/UDP helpers above use lwIP raw APIs directly (under `NO_SYS=1`) and are intended as a bring-up path, not a full PHP sockets layer.
 
 ## SWD debug (OpenOCD + GDB)
 

@@ -16,7 +16,13 @@
 #include "hardware/pwm.h"
 #include "hardware/sync.h"
 #include "lwip/ip4_addr.h"
+#include "lwip/ip_addr.h"
 #include "lwip/netif.h"
+#include "lwip/dns.h"
+#include "lwip/tcp.h"
+#include "lwip/udp.h"
+#include "lwip/pbuf.h"
+#include "lwip/err.h"
 
 #include "Zend/zend.h"
 #include "Zend/zend_API.h"
@@ -171,6 +177,8 @@ ZEND_FUNCTION(mcu_wifi_connect);
 ZEND_FUNCTION(mcu_wifi_disconnect);
 ZEND_FUNCTION(mcu_wifi_status);
 ZEND_FUNCTION(mcu_wifi_ip);
+ZEND_FUNCTION(mcu_tcp_request);
+ZEND_FUNCTION(mcu_udp_sendto);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
@@ -252,6 +260,21 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_wifi_ip, 0, 0, MAY_BE_STRING | MAY_BE_FALSE)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_tcp_request, 0, 3, MAY_BE_STRING | MAY_BE_FALSE)
+	ZEND_ARG_TYPE_INFO(0, host, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, port, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, payload, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, max_read, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_udp_sendto, 0, 3, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, host, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, port, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, payload, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_button_pressed, arginfo_mcu_button_pressed)
 	ZEND_FE(mcu_button_state_mask, arginfo_mcu_button_state_mask)
@@ -273,6 +296,8 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_wifi_disconnect, arginfo_mcu_wifi_disconnect)
 	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
 	ZEND_FE(mcu_wifi_ip, arginfo_mcu_wifi_ip)
+	ZEND_FE(mcu_tcp_request, arginfo_mcu_tcp_request)
+	ZEND_FE(mcu_udp_sendto, arginfo_mcu_udp_sendto)
 	ZEND_FE_END
 };
 
@@ -391,6 +416,168 @@ static uint16_t rp2350_adc_read_avg(uint input, uint samples)
 	}
 
 	return (uint16_t)(sum / samples);
+}
+
+typedef struct {
+	volatile bool done;
+	volatile bool ok;
+	ip_addr_t addr;
+} rp2350_dns_query_t;
+
+typedef struct {
+	struct tcp_pcb *pcb;
+	char *rx;
+	size_t rx_len;
+	size_t rx_cap;
+	volatile bool connected;
+	volatile bool done;
+	volatile bool had_error;
+	volatile bool truncated;
+	err_t last_err;
+} rp2350_tcp_ctx_t;
+
+static void rp2350_dns_found_cb(const char *name, const ip_addr_t *ipaddr, void *arg)
+{
+	rp2350_dns_query_t *q = (rp2350_dns_query_t *)arg;
+	(void)name;
+	if (q == NULL) {
+		return;
+	}
+	if (ipaddr != NULL) {
+		q->addr = *ipaddr;
+		q->ok = true;
+	}
+	q->done = true;
+}
+
+static bool rp2350_lwip_wait_until(absolute_time_t deadline, volatile bool *flag)
+{
+	while (!(*flag)) {
+		if (time_reached(deadline)) {
+			return false;
+		}
+		sleep_ms(1);
+	}
+	return true;
+}
+
+static bool rp2350_dns_resolve(const char *host, uint32_t timeout_ms, ip_addr_t *out_addr)
+{
+	rp2350_dns_query_t q;
+	err_t err;
+	absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
+
+	memset(&q, 0, sizeof(q));
+
+	cyw43_arch_lwip_begin();
+	err = dns_gethostbyname(host, &q.addr, rp2350_dns_found_cb, &q);
+	cyw43_arch_lwip_end();
+
+	if (err == ERR_OK) {
+		*out_addr = q.addr;
+		return true;
+	}
+	if (err != ERR_INPROGRESS) {
+		return false;
+	}
+	if (!rp2350_lwip_wait_until(deadline, &q.done) || !q.ok) {
+		return false;
+	}
+	*out_addr = q.addr;
+	return true;
+}
+
+static err_t rp2350_tcp_connected_cb(void *arg, struct tcp_pcb *tpcb, err_t err)
+{
+	rp2350_tcp_ctx_t *ctx = (rp2350_tcp_ctx_t *)arg;
+	(void)tpcb;
+	if (ctx == NULL) {
+		return ERR_OK;
+	}
+	ctx->last_err = err;
+	if (err == ERR_OK) {
+		ctx->connected = true;
+	} else {
+		ctx->had_error = true;
+		ctx->done = true;
+	}
+	return ERR_OK;
+}
+
+static err_t rp2350_tcp_recv_cb(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err)
+{
+	rp2350_tcp_ctx_t *ctx = (rp2350_tcp_ctx_t *)arg;
+	u16_t recved = 0;
+
+	if (ctx == NULL) {
+		if (p != NULL) {
+			pbuf_free(p);
+		}
+		return ERR_OK;
+	}
+	if (err != ERR_OK) {
+		ctx->last_err = err;
+		ctx->had_error = true;
+		ctx->done = true;
+		if (p != NULL) {
+			pbuf_free(p);
+		}
+		return ERR_OK;
+	}
+	if (p == NULL) {
+		ctx->done = true;
+		return ERR_OK;
+	}
+
+	if (ctx->rx_len < ctx->rx_cap) {
+		size_t avail = ctx->rx_cap - ctx->rx_len;
+		size_t take = (p->tot_len < avail) ? (size_t)p->tot_len : avail;
+		if (take < (size_t)p->tot_len) {
+			ctx->truncated = true;
+		}
+		if (take > 0) {
+			pbuf_copy_partial(p, ctx->rx + ctx->rx_len, (u16_t)take, 0);
+			ctx->rx_len += take;
+		}
+	} else {
+		ctx->truncated = true;
+	}
+
+	recved = p->tot_len;
+	tcp_recved(tpcb, recved);
+	pbuf_free(p);
+	return ERR_OK;
+}
+
+static void rp2350_tcp_err_cb(void *arg, err_t err)
+{
+	rp2350_tcp_ctx_t *ctx = (rp2350_tcp_ctx_t *)arg;
+	if (ctx == NULL) {
+		return;
+	}
+	ctx->last_err = err;
+	ctx->pcb = NULL;
+	ctx->had_error = true;
+	ctx->done = true;
+}
+
+static void rp2350_tcp_ctx_close(rp2350_tcp_ctx_t *ctx)
+{
+	if (ctx == NULL || ctx->pcb == NULL) {
+		return;
+	}
+	cyw43_arch_lwip_begin();
+	tcp_arg(ctx->pcb, NULL);
+	tcp_recv(ctx->pcb, NULL);
+	tcp_err(ctx->pcb, NULL);
+	{
+		err_t err = tcp_close(ctx->pcb);
+		if (err != ERR_OK) {
+			tcp_abort(ctx->pcb);
+		}
+	}
+	cyw43_arch_lwip_end();
+	ctx->pcb = NULL;
 }
 
 static void rp2350_zend_interrupt_handler(zend_execute_data *execute_data)
@@ -887,6 +1074,206 @@ ZEND_FUNCTION(mcu_wifi_ip)
 		RETURN_FALSE;
 	}
 	RETURN_STRING(text);
+}
+
+ZEND_FUNCTION(mcu_tcp_request)
+{
+	char *host = NULL;
+	size_t host_len = 0;
+	zend_long port = 0;
+	char *payload = NULL;
+	size_t payload_len = 0;
+	zend_long timeout_ms = 5000;
+	zend_long max_read = 4096;
+	ip_addr_t remote;
+	rp2350_tcp_ctx_t ctx;
+	absolute_time_t deadline;
+	size_t off = 0;
+
+	ZEND_PARSE_PARAMETERS_START(3, 5)
+		Z_PARAM_STRING(host, host_len)
+		Z_PARAM_LONG(port)
+		Z_PARAM_STRING(payload, payload_len)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(timeout_ms)
+		Z_PARAM_LONG(max_read)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (host_len == 0) {
+		zend_argument_value_error(1, "must not be empty");
+		RETURN_THROWS();
+	}
+	if (port <= 0 || port > 65535) {
+		zend_argument_value_error(2, "must be between 1 and 65535");
+		RETURN_THROWS();
+	}
+	if (timeout_ms < 100) {
+		timeout_ms = 100;
+	}
+	if (max_read < 1) {
+		max_read = 1;
+	} else if (max_read > 262144) {
+		max_read = 262144;
+	}
+
+	if (!rp2350_wifi_init_once()) {
+		RETURN_FALSE;
+	}
+	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
+		RETURN_FALSE;
+	}
+	if (!rp2350_dns_resolve(host, (uint32_t)timeout_ms, &remote)) {
+		RETURN_FALSE;
+	}
+
+	memset(&ctx, 0, sizeof(ctx));
+	ctx.rx_cap = (size_t)max_read;
+	ctx.rx = (char *)malloc(ctx.rx_cap + 1);
+	if (ctx.rx == NULL) {
+		RETURN_FALSE;
+	}
+
+	deadline = make_timeout_time_ms((uint32_t)timeout_ms);
+
+	cyw43_arch_lwip_begin();
+	ctx.pcb = tcp_new_ip_type(IP_GET_TYPE(&remote));
+	if (ctx.pcb != NULL) {
+		tcp_arg(ctx.pcb, &ctx);
+		tcp_recv(ctx.pcb, rp2350_tcp_recv_cb);
+		tcp_err(ctx.pcb, rp2350_tcp_err_cb);
+		ctx.last_err = tcp_connect(ctx.pcb, &remote, (u16_t)port, rp2350_tcp_connected_cb);
+		if (ctx.last_err != ERR_OK) {
+			tcp_arg(ctx.pcb, NULL);
+			tcp_recv(ctx.pcb, NULL);
+			tcp_err(ctx.pcb, NULL);
+			tcp_abort(ctx.pcb);
+			ctx.pcb = NULL;
+		}
+	}
+	cyw43_arch_lwip_end();
+	if (ctx.pcb == NULL) {
+		free(ctx.rx);
+		RETURN_FALSE;
+	}
+
+	if (!rp2350_lwip_wait_until(deadline, &ctx.connected) || ctx.had_error) {
+		rp2350_tcp_ctx_close(&ctx);
+		free(ctx.rx);
+		RETURN_FALSE;
+	}
+
+	while (off < payload_len) {
+		bool wrote = false;
+		cyw43_arch_lwip_begin();
+		if (ctx.pcb != NULL) {
+			u16_t snd = tcp_sndbuf(ctx.pcb);
+			if (snd > 0) {
+				u16_t chunk = (u16_t)((payload_len - off) < snd ? (payload_len - off) : snd);
+				err_t w = tcp_write(ctx.pcb, payload + off, chunk, TCP_WRITE_FLAG_COPY);
+				if (w == ERR_OK) {
+					off += chunk;
+					(void)tcp_output(ctx.pcb);
+					wrote = true;
+				} else if (w != ERR_MEM) {
+					ctx.had_error = true;
+					ctx.last_err = w;
+				}
+			}
+		}
+		cyw43_arch_lwip_end();
+		if (ctx.had_error || ctx.pcb == NULL) {
+			rp2350_tcp_ctx_close(&ctx);
+			free(ctx.rx);
+			RETURN_FALSE;
+		}
+		if (!wrote) {
+			if (time_reached(deadline)) {
+				rp2350_tcp_ctx_close(&ctx);
+				free(ctx.rx);
+				RETURN_FALSE;
+			}
+			sleep_ms(1);
+		}
+	}
+
+	while (!ctx.done && !ctx.had_error) {
+		if (time_reached(deadline)) {
+			break;
+		}
+		sleep_ms(1);
+	}
+
+	rp2350_tcp_ctx_close(&ctx);
+	ctx.rx[ctx.rx_len] = '\0';
+	RETVAL_STRINGL(ctx.rx, ctx.rx_len);
+	free(ctx.rx);
+}
+
+ZEND_FUNCTION(mcu_udp_sendto)
+{
+	char *host = NULL;
+	size_t host_len = 0;
+	zend_long port = 0;
+	char *payload = NULL;
+	size_t payload_len = 0;
+	zend_long timeout_ms = 2000;
+	ip_addr_t remote;
+	struct udp_pcb *pcb = NULL;
+	struct pbuf *pb = NULL;
+	bool ok = false;
+
+	ZEND_PARSE_PARAMETERS_START(3, 4)
+		Z_PARAM_STRING(host, host_len)
+		Z_PARAM_LONG(port)
+		Z_PARAM_STRING(payload, payload_len)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(timeout_ms)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (host_len == 0) {
+		zend_argument_value_error(1, "must not be empty");
+		RETURN_THROWS();
+	}
+	if (port <= 0 || port > 65535) {
+		zend_argument_value_error(2, "must be between 1 and 65535");
+		RETURN_THROWS();
+	}
+	if (timeout_ms < 100) {
+		timeout_ms = 100;
+	}
+	if (payload_len > 1472) {
+		zend_argument_value_error(3, "must be 1472 bytes or less");
+		RETURN_THROWS();
+	}
+
+	if (!rp2350_wifi_init_once()) {
+		RETURN_FALSE;
+	}
+	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
+		RETURN_FALSE;
+	}
+	if (!rp2350_dns_resolve(host, (uint32_t)timeout_ms, &remote)) {
+		RETURN_FALSE;
+	}
+
+	cyw43_arch_lwip_begin();
+	pcb = udp_new_ip_type(IP_GET_TYPE(&remote));
+	if (pcb != NULL) {
+		pb = pbuf_alloc(PBUF_TRANSPORT, (u16_t)payload_len, PBUF_RAM);
+		if (pb != NULL) {
+			memcpy(pb->payload, payload, payload_len);
+			ok = (udp_sendto(pcb, pb, &remote, (u16_t)port) == ERR_OK);
+		}
+	}
+	if (pb != NULL) {
+		pbuf_free(pb);
+	}
+	if (pcb != NULL) {
+		udp_remove(pcb);
+	}
+	cyw43_arch_lwip_end();
+
+	RETURN_BOOL(ok);
 }
 
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)
