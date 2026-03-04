@@ -10,6 +10,7 @@
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
+#include "hardware/sync.h"
 
 #include "Zend/zend.h"
 #include "Zend/zend_API.h"
@@ -42,6 +43,12 @@ static bool rp2350_stream_open_seen = false;
 static char rp2350_stream_open_last_in[96];
 static char rp2350_stream_open_last_path[96];
 static const char *rp2350_stream_open_last_reason = "none";
+static bool s_buttons_init = false;
+static bool s_leds_init = false;
+static volatile uint32_t s_button_state_mask = 0;
+static volatile uint32_t s_button_irq_pending_mask = 0;
+static volatile uint32_t s_button_irq_generation = 0;
+static void (*s_prev_zend_interrupt_function)(zend_execute_data *execute_data) = NULL;
 
 extern void php_printf_to_smart_string(smart_string *buf, const char *format, va_list ap);
 extern void php_printf_to_smart_str(smart_str *buf, const char *format, va_list ap);
@@ -118,14 +125,35 @@ static void rp2350_vfs_closer(void *handle)
 }
 
 ZEND_FUNCTION(mcu_sleep_ms);
+ZEND_FUNCTION(mcu_button_pressed);
+ZEND_FUNCTION(mcu_button_state_mask);
+ZEND_FUNCTION(mcu_button_wait);
+ZEND_FUNCTION(mcu_led_set);
 ZEND_FUNCTION(mcu_epd_fill);
 ZEND_FUNCTION(mcu_epd_clear);
 ZEND_FUNCTION(mcu_epd_set_pixel);
 ZEND_FUNCTION(mcu_epd_update);
 ZEND_FUNCTION(mcu_epd_render);
+PHP_MINIT_FUNCTION(rp2350_mcu);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep_ms, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, ms, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, button, IS_LONG, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_state_mask, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_button_wait, 0, 1, MAY_BE_LONG | MAY_BE_FALSE)
+	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_led_set, 0, 2, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, on, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_fill, 0, 1, _IS_BOOL, 0)
@@ -155,6 +183,10 @@ ZEND_END_ARG_INFO()
 
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_sleep_ms, arginfo_mcu_sleep_ms)
+	ZEND_FE(mcu_button_pressed, arginfo_mcu_button_pressed)
+	ZEND_FE(mcu_button_state_mask, arginfo_mcu_button_state_mask)
+	ZEND_FE(mcu_button_wait, arginfo_mcu_button_wait)
+	ZEND_FE(mcu_led_set, arginfo_mcu_led_set)
 	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
 	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
 	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
@@ -167,7 +199,7 @@ static zend_module_entry rp2350_mcu_module_entry = {
 	STANDARD_MODULE_HEADER,
 	"rp2350_mcu",
 	rp2350_mcu_functions,
-	NULL,
+	PHP_MINIT(rp2350_mcu),
 	NULL,
 	NULL,
 	NULL,
@@ -188,6 +220,280 @@ ZEND_FUNCTION(mcu_sleep_ms)
 		ms = 0;
 	}
 	sleep_ms((uint32_t) ms);
+	RETURN_TRUE;
+}
+
+static bool rp2350_button_gpio_is_pressed(uint32_t gpio)
+{
+	return gpio_get(gpio) == 0;
+}
+
+static uint32_t rp2350_led_gpio_for_index(zend_long index)
+{
+	switch (index) {
+		case 0: return BW_LED_0;
+		case 1: return BW_LED_1;
+		case 2: return BW_LED_2;
+		case 3: return BW_LED_3;
+		default: return UINT32_MAX;
+	}
+}
+
+static uint32_t rp2350_button_gpio_for_id(zend_long button)
+{
+	switch (button) {
+		case 0: return BW_SWITCH_A;
+		case 1: return BW_SWITCH_B;
+		case 2: return BW_SWITCH_C;
+		case 3: return BW_SWITCH_UP;
+		case 4: return BW_SWITCH_DOWN;
+		case 5: return BW_SWITCH_HOME;
+		case 6: return BW_RESET_SW;
+		default: return UINT32_MAX;
+	}
+}
+
+static void rp2350_leds_init(void)
+{
+	const uint32_t gpios[] = { BW_LED_0, BW_LED_1, BW_LED_2, BW_LED_3 };
+	size_t i;
+
+	if (s_leds_init) {
+		return;
+	}
+	for (i = 0; i < sizeof(gpios) / sizeof(gpios[0]); i++) {
+		gpio_init(gpios[i]);
+		gpio_set_dir(gpios[i], GPIO_OUT);
+		gpio_put(gpios[i], 0);
+	}
+	s_leds_init = true;
+}
+
+static void rp2350_zend_interrupt_handler(zend_execute_data *execute_data)
+{
+	uint32_t pending;
+	uint32_t irq_state;
+
+	(void)execute_data;
+
+	irq_state = save_and_disable_interrupts();
+	pending = s_button_irq_pending_mask;
+	s_button_irq_pending_mask = 0;
+	restore_interrupts(irq_state);
+	(void)pending;
+
+	if (s_prev_zend_interrupt_function) {
+		s_prev_zend_interrupt_function(execute_data);
+	}
+}
+
+static void rp2350_button_gpio_irq(uint gpio, uint32_t events)
+{
+	int id = -1;
+	bool pressed;
+
+	(void)events;
+	switch (gpio) {
+		case BW_SWITCH_A: id = 0; break;
+		case BW_SWITCH_B: id = 1; break;
+		case BW_SWITCH_C: id = 2; break;
+		case BW_SWITCH_UP: id = 3; break;
+		case BW_SWITCH_DOWN: id = 4; break;
+		case BW_SWITCH_HOME: id = 5; break;
+		case BW_RESET_SW: id = 6; break;
+		default: return;
+	}
+
+	pressed = rp2350_button_gpio_is_pressed(gpio);
+	if (pressed) {
+		s_button_state_mask |= (1u << id);
+	} else {
+		s_button_state_mask &= ~(1u << id);
+	}
+	s_button_irq_pending_mask |= (1u << id);
+	s_button_irq_generation++;
+
+	if (rp2350_zend_started) {
+		zend_atomic_bool_store_ex(&EG(vm_interrupt), true);
+	}
+}
+
+static void rp2350_buttons_init(void)
+{
+	const uint32_t gpios[] = {
+		BW_SWITCH_A, BW_SWITCH_B, BW_SWITCH_C, BW_SWITCH_UP, BW_SWITCH_DOWN,
+		BW_SWITCH_HOME, BW_RESET_SW
+	};
+	size_t i;
+	bool callback_set = false;
+
+	if (s_buttons_init) {
+		return;
+	}
+
+	for (i = 0; i < sizeof(gpios) / sizeof(gpios[0]); i++) {
+		uint32_t gpio = gpios[i];
+		gpio_init(gpio);
+		gpio_set_dir(gpio, GPIO_IN);
+		gpio_pull_up(gpio);
+		if (rp2350_button_gpio_is_pressed(gpio)) {
+			switch (gpio) {
+				case BW_SWITCH_A: s_button_state_mask |= (1u << 0); break;
+				case BW_SWITCH_B: s_button_state_mask |= (1u << 1); break;
+				case BW_SWITCH_C: s_button_state_mask |= (1u << 2); break;
+				case BW_SWITCH_UP: s_button_state_mask |= (1u << 3); break;
+				case BW_SWITCH_DOWN: s_button_state_mask |= (1u << 4); break;
+				case BW_SWITCH_HOME: s_button_state_mask |= (1u << 5); break;
+				case BW_RESET_SW: s_button_state_mask |= (1u << 6); break;
+				default: break;
+			}
+		}
+		if (!callback_set) {
+			gpio_set_irq_enabled_with_callback(
+				gpio,
+				GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE,
+				true,
+				&rp2350_button_gpio_irq
+			);
+			callback_set = true;
+		} else {
+			gpio_set_irq_enabled(gpio, GPIO_IRQ_EDGE_FALL | GPIO_IRQ_EDGE_RISE, true);
+		}
+	}
+
+	s_buttons_init = true;
+	s_button_irq_pending_mask = 0xffffffffu; /* force initial LED sync on first interrupt check */
+}
+
+ZEND_FUNCTION(mcu_button_pressed)
+{
+	zend_long button = -1;
+	bool button_is_null = true;
+
+	ZEND_PARSE_PARAMETERS_START(0, 1)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG_OR_NULL(button, button_is_null)
+	ZEND_PARSE_PARAMETERS_END();
+
+	rp2350_buttons_init();
+
+	if (button_is_null || button < 0) {
+		RETURN_BOOL(
+			rp2350_button_gpio_is_pressed(BW_SWITCH_A) ||
+			rp2350_button_gpio_is_pressed(BW_SWITCH_B) ||
+			rp2350_button_gpio_is_pressed(BW_SWITCH_C) ||
+			rp2350_button_gpio_is_pressed(BW_SWITCH_UP) ||
+			rp2350_button_gpio_is_pressed(BW_SWITCH_DOWN));
+	}
+
+	{
+		uint32_t gpio = rp2350_button_gpio_for_id(button);
+		if (gpio == UINT32_MAX) {
+			zend_argument_value_error(1, "must be one of MCU_BTN_A..MCU_BTN_RESET");
+			RETURN_THROWS();
+		}
+		RETURN_BOOL(rp2350_button_gpio_is_pressed(gpio));
+	}
+}
+
+ZEND_FUNCTION(mcu_button_state_mask)
+{
+	uint32_t irq_state;
+	uint32_t mask;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_buttons_init();
+
+	irq_state = save_and_disable_interrupts();
+	mask = s_button_state_mask;
+	restore_interrupts(irq_state);
+
+	RETURN_LONG((zend_long)mask);
+}
+
+ZEND_FUNCTION(mcu_button_wait)
+{
+	zend_long timeout_ms = 0;
+	uint32_t start_us;
+	uint32_t baseline_generation;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(timeout_ms)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (timeout_ms < 0) {
+		timeout_ms = 0;
+	}
+
+	rp2350_buttons_init();
+
+	{
+		uint32_t irq_state = save_and_disable_interrupts();
+		baseline_generation = s_button_irq_generation;
+		restore_interrupts(irq_state);
+	}
+	start_us = time_us_32();
+
+	for (;;) {
+		uint32_t irq_state = save_and_disable_interrupts();
+		uint32_t generation = s_button_irq_generation;
+		uint32_t mask = s_button_state_mask;
+		restore_interrupts(irq_state);
+
+		if (generation != baseline_generation) {
+			RETURN_LONG((zend_long)mask);
+		}
+		if (timeout_ms == 0) {
+			RETURN_FALSE;
+		}
+		if ((time_us_32() - start_us) >= (uint32_t)(timeout_ms * 1000)) {
+			RETURN_FALSE;
+		}
+		sleep_ms(1);
+	}
+}
+
+PHP_MINIT_FUNCTION(rp2350_mcu)
+{
+	REGISTER_LONG_CONSTANT("MCU_BTN_A", 0, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_BTN_B", 1, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_BTN_C", 2, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_BTN_UP", 3, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_BTN_DOWN", 4, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_BTN_HOME", 5, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_BTN_RESET", 6, CONST_CS | CONST_PERSISTENT);
+
+	REGISTER_LONG_CONSTANT("MCU_LED_0", 0, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_LED_1", 1, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_LED_2", 2, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_LED_3", 3, CONST_CS | CONST_PERSISTENT);
+
+	rp2350_leds_init();
+	rp2350_buttons_init();
+
+	return SUCCESS;
+}
+
+ZEND_FUNCTION(mcu_led_set)
+{
+	zend_long index = 0;
+	bool on = false;
+	uint32_t gpio;
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_LONG(index)
+		Z_PARAM_BOOL(on)
+	ZEND_PARSE_PARAMETERS_END();
+
+	gpio = rp2350_led_gpio_for_index(index);
+	if (gpio == UINT32_MAX) {
+		zend_argument_value_error(1, "must be between 0 and 3");
+		RETURN_THROWS();
+	}
+
+	rp2350_leds_init();
+
+	gpio_put(gpio, on ? 1 : 0);
 	RETURN_TRUE;
 }
 
@@ -666,6 +972,10 @@ int rp2350_eval_startup(void)
 		rp2350_eval_error = "php_module_startup failed";
 		return -1;
 	}
+
+	s_prev_zend_interrupt_function = zend_interrupt_function;
+	zend_interrupt_function = rp2350_zend_interrupt_handler;
+	zend_atomic_bool_store_ex(&EG(vm_interrupt), true);
 
 	rp2350_zend_started = true;
 	rp2350_eval_error = "ok";

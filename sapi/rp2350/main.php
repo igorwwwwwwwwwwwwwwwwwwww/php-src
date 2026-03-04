@@ -5,8 +5,25 @@ require '/logo.php';
 print "req:logo:ok\n";
 
 $did_epd = false;
+$next_log_at = microtime(true);
+$led_mask = 0;
 
 while (true) {
+    $mask = mcu_button_wait(100);
+    if ($mask !== false) {
+        $led_mask = $mask;
+        mcu_led_set(MCU_LED_0, (($led_mask & (1 << MCU_BTN_A)) !== 0));
+        mcu_led_set(MCU_LED_1, (($led_mask & (1 << MCU_BTN_B)) !== 0));
+        mcu_led_set(MCU_LED_2, (($led_mask & (1 << MCU_BTN_UP)) !== 0));
+        mcu_led_set(MCU_LED_3, (($led_mask & (1 << MCU_BTN_DOWN)) !== 0));
+    }
+
+    $now = microtime(true);
+    if ($now < $next_log_at) {
+        continue;
+    }
+    $next_log_at += 1.0;
+
     if (!$did_epd) {
         print "logo:decode:start\n";
         $logo = php_logo_data();
@@ -55,6 +72,7 @@ while (true) {
         print strlen($lib);
         print "\n";
     }
+
     print "time:";
     print time();
     print " microtime_s:";
@@ -70,5 +88,4 @@ while (true) {
     print hrtime(true);
     print "\n";
     print tick_line();
-    sleep(1);
 }
