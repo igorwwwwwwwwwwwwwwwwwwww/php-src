@@ -6,7 +6,7 @@ set(PICO_PLATFORM "rp2350" CACHE STRING "Pico platform")
 set(PICO_DEFAULT_UART "0" CACHE STRING "Default UART instance for stdio")
 set(PICO_DEFAULT_UART_TX_PIN "4" CACHE STRING "Default UART TX pin for stdio")
 set(PICO_DEFAULT_UART_RX_PIN "5" CACHE STRING "Default UART RX pin for stdio")
-set(RP2350_WAIT_FOR_USB_SERIAL_MS "0" CACHE STRING "Wait up to this many milliseconds for USB CDC serial connection before boot logs (0 disables)")
+set(RP2350_WAIT_FOR_USB_SERIAL_MS "10000" CACHE STRING "Wait up to this many milliseconds for USB CDC serial connection before boot logs (0 disables)")
 
 if(NOT DEFINED PICO_SDK_PATH)
   set(PICO_SDK_PATH "${CMAKE_CURRENT_LIST_DIR}/third_party/pico-sdk")
@@ -220,8 +220,10 @@ target_compile_definitions(php_mcu_firmware PRIVATE
 
 target_link_libraries(php_mcu_firmware
   pico_stdlib
+  hardware_adc
   hardware_gpio
   hardware_i2c
+  hardware_pwm
   hardware_spi
   hardware_xip_cache
 )

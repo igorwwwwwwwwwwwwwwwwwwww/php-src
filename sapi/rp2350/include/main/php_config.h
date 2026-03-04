@@ -55,6 +55,17 @@
 #undef HAVE_OPENPTY
 #undef PHP_CAN_SUPPORT_PROC_OPEN
 
+/*
+ * Host-generated php_config.h is for a 64-bit build machine.
+ * RP2350 firmware is 32-bit Arm, so these ABI sizes must be overridden.
+ * Mismatches here corrupt Zend operand/literal interpretation.
+ */
+#undef SIZEOF_LONG
+#define SIZEOF_LONG 4
+
+#undef SIZEOF_SIZE_T
+#define SIZEOF_SIZE_T 4
+
 #include <setjmp.h>
 #ifndef sigjmp_buf
 # define sigjmp_buf jmp_buf

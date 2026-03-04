@@ -11,6 +11,8 @@
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/sem.h"
+#include "hardware/adc.h"
+#include "hardware/pwm.h"
 #include "hardware/sync.h"
 
 #include "Zend/zend.h"
@@ -46,11 +48,21 @@ static char rp2350_stream_open_last_path[96];
 static const char *rp2350_stream_open_last_reason = "none";
 static bool s_buttons_init = false;
 static bool s_leds_init = false;
+static bool s_power_sense_init = false;
 static semaphore_t s_button_sem;
 static volatile uint32_t s_button_state_mask = 0;
 static volatile uint32_t s_button_irq_pending_mask = 0;
 static volatile uint32_t s_button_irq_generation = 0;
 static void (*s_prev_zend_interrupt_function)(zend_execute_data *execute_data) = NULL;
+static const char rp2350_ini_entries[] =
+	"html_errors=0\n"
+	"display_errors=1\n"
+	"display_startup_errors=1\n"
+	"log_errors=0\n"
+	"error_reporting=32767\n"
+	"date.timezone=UTC\n"
+	"max_execution_time=0\n"
+	"memory_limit=32M\n";
 
 extern void php_printf_to_smart_string(smart_string *buf, const char *format, va_list ap);
 extern void php_printf_to_smart_str(smart_str *buf, const char *format, va_list ap);
@@ -130,11 +142,17 @@ ZEND_FUNCTION(mcu_button_pressed);
 ZEND_FUNCTION(mcu_button_state_mask);
 ZEND_FUNCTION(mcu_button_wait);
 ZEND_FUNCTION(mcu_led_set);
+ZEND_FUNCTION(mcu_led_level);
 ZEND_FUNCTION(mcu_epd_fill);
 ZEND_FUNCTION(mcu_epd_clear);
 ZEND_FUNCTION(mcu_epd_set_pixel);
 ZEND_FUNCTION(mcu_epd_update);
 ZEND_FUNCTION(mcu_epd_render);
+ZEND_FUNCTION(mcu_battery_voltage);
+ZEND_FUNCTION(mcu_battery_mv);
+ZEND_FUNCTION(mcu_usb_connected);
+ZEND_FUNCTION(mcu_battery_raw_vbat);
+ZEND_FUNCTION(mcu_battery_raw_vref);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
@@ -151,6 +169,11 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_led_set, 0, 2, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, on, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_led_level, 0, 2, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, index, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, level, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_fill, 0, 1, _IS_BOOL, 0)
@@ -178,16 +201,37 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_render, 0, 3, _IS_BOOL, 
 	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 1)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_voltage, 0, 0, IS_DOUBLE, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_usb_connected, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_mv, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_raw_vbat, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_raw_vref, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_button_pressed, arginfo_mcu_button_pressed)
 	ZEND_FE(mcu_button_state_mask, arginfo_mcu_button_state_mask)
 	ZEND_FE(mcu_button_wait, arginfo_mcu_button_wait)
 	ZEND_FE(mcu_led_set, arginfo_mcu_led_set)
+	ZEND_FE(mcu_led_level, arginfo_mcu_led_level)
 	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
 	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
 	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
 	ZEND_FE(mcu_epd_update, arginfo_mcu_epd_update)
 	ZEND_FE(mcu_epd_render, arginfo_mcu_epd_render)
+	ZEND_FE(mcu_battery_voltage, arginfo_mcu_battery_voltage)
+	ZEND_FE(mcu_battery_mv, arginfo_mcu_battery_mv)
+	ZEND_FE(mcu_usb_connected, arginfo_mcu_usb_connected)
+	ZEND_FE(mcu_battery_raw_vbat, arginfo_mcu_battery_raw_vbat)
+	ZEND_FE(mcu_battery_raw_vref, arginfo_mcu_battery_raw_vref)
 	ZEND_FE_END
 };
 
@@ -243,11 +287,56 @@ static void rp2350_leds_init(void)
 		return;
 	}
 	for (i = 0; i < sizeof(gpios) / sizeof(gpios[0]); i++) {
-		gpio_init(gpios[i]);
-		gpio_set_dir(gpios[i], GPIO_OUT);
-		gpio_put(gpios[i], 0);
+		uint slice;
+		uint chan;
+		gpio_set_function(gpios[i], GPIO_FUNC_PWM);
+		slice = pwm_gpio_to_slice_num(gpios[i]);
+		chan = pwm_gpio_to_channel(gpios[i]);
+		pwm_set_wrap(slice, 65535);
+		pwm_set_chan_level(slice, chan, 0);
+		pwm_set_enabled(slice, true);
 	}
 	s_leds_init = true;
+}
+
+static void rp2350_power_sense_init(void)
+{
+	if (s_power_sense_init) {
+		return;
+	}
+
+	/* Match board bring-up expectations: keep switched power rail enabled. */
+	gpio_init(BW_SW_POWER_EN);
+	gpio_set_dir(BW_SW_POWER_EN, GPIO_OUT);
+	gpio_put(BW_SW_POWER_EN, 1);
+
+	/* VBAT_SENSE and SENSE_1V1 are from Badger 2350 reference firmware. */
+	adc_init();
+	adc_gpio_init(26); /* VBAT_SENSE */
+	adc_gpio_init(28); /* SENSE_1V1 */
+
+	gpio_init(BW_VBUS_DETECT);
+	gpio_set_dir(BW_VBUS_DETECT, GPIO_IN);
+	gpio_disable_pulls(BW_VBUS_DETECT);
+
+	s_power_sense_init = true;
+}
+
+static uint16_t rp2350_adc_read_avg(uint input, uint samples)
+{
+	uint32_t sum = 0;
+	uint i;
+
+	for (i = 0; i < samples; i++) {
+		adc_select_input(input);
+		sleep_us(5);
+		(void)adc_read(); /* throw-away after mux switch */
+		sleep_us(5);
+		sum += adc_read();
+		sleep_us(20);
+	}
+
+	return (uint16_t)(sum / samples);
 }
 
 static void rp2350_zend_interrupt_handler(zend_execute_data *execute_data)
@@ -458,7 +547,44 @@ ZEND_FUNCTION(mcu_led_set)
 
 	rp2350_leds_init();
 
-	gpio_put(gpio, on ? 1 : 0);
+	{
+		uint slice = pwm_gpio_to_slice_num(gpio);
+		uint chan = pwm_gpio_to_channel(gpio);
+		pwm_set_chan_level(slice, chan, on ? 65535u : 0u);
+	}
+	RETURN_TRUE;
+}
+
+ZEND_FUNCTION(mcu_led_level)
+{
+	zend_long index = 0;
+	zend_long level = 0;
+	uint32_t gpio;
+
+	ZEND_PARSE_PARAMETERS_START(2, 2)
+		Z_PARAM_LONG(index)
+		Z_PARAM_LONG(level)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (level < 0) {
+		level = 0;
+	} else if (level > 65535) {
+		level = 65535;
+	}
+
+	gpio = rp2350_led_gpio_for_index(index);
+	if (gpio == UINT32_MAX) {
+		zend_argument_value_error(1, "must be between 0 and 3");
+		RETURN_THROWS();
+	}
+
+	rp2350_leds_init();
+
+	{
+		uint slice = pwm_gpio_to_slice_num(gpio);
+		uint chan = pwm_gpio_to_channel(gpio);
+		pwm_set_chan_level(slice, chan, (uint16_t)level);
+	}
 	RETURN_TRUE;
 }
 
@@ -539,6 +665,77 @@ ZEND_FUNCTION(mcu_epd_render)
 		RETURN_FALSE;
 	}
 	RETURN_BOOL(rp2350_epd_update());
+}
+
+ZEND_FUNCTION(mcu_usb_connected)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_power_sense_init();
+	RETURN_BOOL(gpio_get(BW_VBUS_DETECT) != 0);
+}
+
+ZEND_FUNCTION(mcu_battery_voltage)
+{
+	uint16_t vbat_raw;
+	uint16_t vref_raw;
+	double voltage;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_power_sense_init();
+
+	/* ADC input 0 = GPIO26 (VBAT_SENSE), input 2 = GPIO28 (SENSE_1V1). */
+	vbat_raw = rp2350_adc_read_avg(0u, 10u);
+	vref_raw = rp2350_adc_read_avg(2u, 10u);
+
+	/* Prefer calibrated path (matches stock), fallback to 3.3V ADC scale if VREF sense is invalid. */
+	if (vref_raw >= 16u) {
+		voltage = ((double)vbat_raw / (double)vref_raw) * 2.0 * 1.1;
+	} else {
+		voltage = ((double)vbat_raw / 4095.0) * 3.3 * 2.0;
+	}
+
+	if (voltage < 0.0) {
+		voltage = 0.0;
+	} else if (voltage > 6.0) {
+		voltage = 6.0;
+	}
+	RETURN_DOUBLE(voltage);
+}
+
+ZEND_FUNCTION(mcu_battery_mv)
+{
+	uint16_t vbat_raw;
+	uint16_t vref_raw;
+	uint32_t mv;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_power_sense_init();
+
+	vbat_raw = rp2350_adc_read_avg(0u, 10u);
+	vref_raw = rp2350_adc_read_avg(2u, 10u);
+	if (vref_raw == 0u) {
+		RETURN_LONG(0);
+	}
+
+	mv = ((uint32_t)vbat_raw * 2200u + ((uint32_t)vref_raw / 2u)) / (uint32_t)vref_raw;
+	if (mv > 6000u) {
+		mv = 6000u;
+	}
+	RETURN_LONG((zend_long)mv);
+}
+
+ZEND_FUNCTION(mcu_battery_raw_vbat)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_power_sense_init();
+	RETURN_LONG((zend_long)rp2350_adc_read_avg(0u, 10u));
+}
+
+ZEND_FUNCTION(mcu_battery_raw_vref)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_power_sense_init();
+	RETURN_LONG((zend_long)rp2350_adc_read_avg(2u, 10u));
 }
 
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)
@@ -736,8 +933,8 @@ static sapi_module_struct rp2350_sapi_module = {
 	NULL, /* get_target_gid */
 	NULL, /* input_filter */
 	NULL, /* ini_defaults */
-	0, /* phpinfo_as_text */
-	NULL, /* ini_entries */
+	1, /* phpinfo_as_text */
+	rp2350_ini_entries, /* ini_entries */
 	NULL, /* additional_functions */
 	NULL, /* input_filter_init */
 	NULL  /* pre_request_init */

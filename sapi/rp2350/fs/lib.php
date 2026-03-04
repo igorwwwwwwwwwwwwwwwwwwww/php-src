@@ -2,6 +2,7 @@
 
 const MCU_EPD_WIDTH = 296;
 const MCU_EPD_HEIGHT = 128;
+const MCU_BAT_MAX_V = 4.10;
 
 const MCU_FONT_5X7 = array(
     ' ' => array(0, 0, 0, 0, 0, 0, 0),
@@ -107,4 +108,62 @@ function mcu_draw_text(&$buf, $w, $h, $x, $y, $text, $scale = 1, $spacing = 1) {
         mcu_draw_char($buf, $w, $h, $cx, $y, $ch, $scale);
         $cx += (5 * $scale) + $spacing;
     }
+}
+
+function mcu_battery_level_from_voltage($voltage) {
+    if (!is_numeric($voltage)) {
+        return 0;
+    }
+    $v = (float)$voltage;
+    if ($v <= 0.0 || $v > 6.0) {
+        return 0;
+    }
+
+    $base = 1.0 + pow(($v / 3.2), 80.0);
+    $den = pow($base, 0.165);
+    if (!is_numeric($den) || $den <= 0.0) {
+        return 0;
+    }
+
+    $pct = round(123.0 - (123.0 / $den));
+    if ($pct < 0) {
+        return 0;
+    }
+    if ($pct > 100) {
+        return 100;
+    }
+    return $pct;
+}
+
+function mcu_battery_level() {
+    return mcu_battery_level_from_voltage(mcu_battery_voltage());
+}
+
+function mcu_is_charging_estimate($voltage, $usb_connected) {
+    return $usb_connected && ($voltage < MCU_BAT_MAX_V);
+}
+
+function mcu_battery_voltage_from_raw($raw_vbat, $raw_vref) {
+    if (!is_numeric($raw_vbat) || !is_numeric($raw_vref)) {
+        return 0.0;
+    }
+    $vbat = (int)($raw_vbat + 0);
+    $vref = (int)($raw_vref + 0);
+    if ($vbat <= 0 || $vref <= 0) {
+        return 0.0;
+    }
+    if ($vbat < 200) {
+        /* Ignore startup/outlier samples that are clearly invalid. */
+        return 0.0;
+    }
+
+    /* Mirror stock path with integer math first: volts = (vbat/vref) * 2.2 */
+    $lhs = ($vbat * 2200);
+    $half = ($vref / 2.0);
+    $num = ($lhs + $half);
+    $mv = (int) floor($num / $vref);
+    if ($mv <= 0 || $mv > 6000) {
+        return 0.0;
+    }
+    return $mv / 1000.0;
 }

@@ -2,13 +2,14 @@
 require '/lib.php';
 require '/logo.php';
 
-function redraw_mode($mode_logo) {
+function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging) {
     if ($mode_logo) {
         $logo = php_logo_data();
         if ($logo !== false) {
             $buf = $logo[0];
             $w = $logo[1];
             $h = $logo[2];
+            print "epd:render:logo\n";
             mcu_epd_render($buf, $w, $h);
         }
         return;
@@ -17,7 +18,11 @@ function redraw_mode($mode_logo) {
     $buf = mcu_fb_create(MCU_EPD_WIDTH, MCU_EPD_HEIGHT, false);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 18, 18, 'PHP RP2350', 3, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 56, 'BUTTONS -> LEDS', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 80, 'TIME + UART LOOP', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 80, 'BAT', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 80, (string)$batt_pct, 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 118, 80, $usb_connected ? 'USB' : 'BAT', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 168, 80, $charging ? 'CHG' : 'IDLE', 2, 2);
+    print "epd:render:text\n";
     mcu_epd_render($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT);
 }
 
@@ -26,12 +31,38 @@ $prev_mask = 0;
 $needs_redraw = true;
 $next_log_s = time() + 1;
 $led_mask = 0;
+$raw_vbat = mcu_battery_raw_vbat();
+$raw_vref = mcu_battery_raw_vref();
+$batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
+$usb_connected = mcu_usb_connected();
+$batt_pct = mcu_battery_level_from_voltage($batt_v);
+$prev_batt_pct = $batt_pct;
+$charging = mcu_is_charging_estimate($batt_v, $usb_connected);
 
 while (true) {
     $now_s = time();
     $remaining_ms = ($next_log_s - $now_s) * 1000;
     if ($remaining_ms <= 0) {
         $remaining_ms = 1;
+    }
+    if ($remaining_ms > 50) {
+        $remaining_ms = 50;
+    }
+
+    /* LED policy: A/UP/DOWN mirror buttons; LED1 breathes while charging. */
+    mcu_led_set(MCU_LED_0, (($led_mask & (1 << MCU_BTN_A)) !== 0));
+    mcu_led_set(MCU_LED_2, (($led_mask & (1 << MCU_BTN_UP)) !== 0));
+    mcu_led_set(MCU_LED_3, (($led_mask & (1 << MCU_BTN_DOWN)) !== 0));
+    if ($charging) {
+        $period_ms = 1800;
+        $half = (int) ($period_ms / 2);
+        $t = (int) fmod(microtime(true) * 1000.0, (float)$period_ms);
+        $tri = ($t < $half) ? $t : ($period_ms - $t);
+        $linear = (int) (($tri * 65535) / $half);
+        $gamma = (int) (($linear * $linear) / 65535);
+        mcu_led_level(MCU_LED_1, $gamma);
+    } else {
+        mcu_led_set(MCU_LED_1, (($led_mask & (1 << MCU_BTN_B)) !== 0));
     }
 
     $mask = mcu_button_wait($remaining_ms);
@@ -46,12 +77,11 @@ while (true) {
         }
         $prev_mask = $mask;
         $led_mask = $mask;
-        mcu_led_set(MCU_LED_0, (($led_mask & (1 << MCU_BTN_A)) !== 0));
-        mcu_led_set(MCU_LED_1, (($led_mask & (1 << MCU_BTN_B)) !== 0));
-        mcu_led_set(MCU_LED_2, (($led_mask & (1 << MCU_BTN_UP)) !== 0));
-        mcu_led_set(MCU_LED_3, (($led_mask & (1 << MCU_BTN_DOWN)) !== 0));
         if ($needs_redraw) {
-            redraw_mode($mode_logo);
+            $batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
+            $batt_pct = mcu_battery_level_from_voltage($batt_v);
+            $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
+            redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging);
             $needs_redraw = false;
         }
         continue;
@@ -63,8 +93,22 @@ while (true) {
     }
     $next_log_s = $now_s + 1;
 
+    $raw_vbat = mcu_battery_raw_vbat();
+    $raw_vref = mcu_battery_raw_vref();
+    $batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
+    $usb_connected = mcu_usb_connected();
+    $batt_pct = mcu_battery_level_from_voltage($batt_v);
+    $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
+    if ($batt_pct !== $prev_batt_pct) {
+        $needs_redraw = true;
+        $prev_batt_pct = $batt_pct;
+    }
+
     if ($needs_redraw) {
-        redraw_mode($mode_logo);
+        $batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
+        $batt_pct = mcu_battery_level_from_voltage($batt_v);
+        $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
+        redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging);
         $needs_redraw = false;
     }
 
@@ -81,5 +125,17 @@ while (true) {
     print $hrt[1];
     print " hrtime_n:";
     print hrtime(true);
+    print " batt_v:";
+    print $batt_v;
+    print " batt_pct:";
+    print $batt_pct;
+    print " raw_vbat:";
+    print $raw_vbat;
+    print " raw_vref:";
+    print $raw_vref;
+    print " usb:";
+    print $usb_connected ? "1" : "0";
+    print " chg:";
+    print $charging ? "1" : "0";
     print "\n";
 }
