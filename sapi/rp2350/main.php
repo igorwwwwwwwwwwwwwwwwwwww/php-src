@@ -95,6 +95,17 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
             print str_replace("\r", "", substr($resp, 0, 32));
             print "\n";
         }
+
+        $http = @file_get_contents('http://example.com/');
+        if ($http === false) {
+            print "http:wrapper:fail\n";
+        } else {
+            print "http:wrapper:ok len:";
+            print strlen($http);
+            print " head:";
+            print substr($http, 0, 24);
+            print "\n";
+        }
     }
 }
 

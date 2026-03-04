@@ -90,6 +90,7 @@ typedef struct {
 	const char *src;
 	size_t len;
 	size_t pos;
+	bool owned;
 } rp2350_vfs_stream_t;
 
 static const rp2350_vfs_file_t *rp2350_vfs_find(const char *path)
@@ -154,7 +155,11 @@ static size_t rp2350_vfs_fsizer(void *handle)
 
 static void rp2350_vfs_closer(void *handle)
 {
-	free(handle);
+	rp2350_vfs_stream_t *s = (rp2350_vfs_stream_t *)handle;
+	if (s && s->owned && s->src) {
+		free((void *)s->src);
+	}
+	free(s);
 }
 
 ZEND_FUNCTION(mcu_button_pressed);
@@ -578,6 +583,243 @@ static void rp2350_tcp_ctx_close(rp2350_tcp_ctx_t *ctx)
 	}
 	cyw43_arch_lwip_end();
 	ctx->pcb = NULL;
+}
+
+bool rp2350_net_tcp_request(
+	const char *host,
+	u16_t port,
+	const char *payload,
+	size_t payload_len,
+	uint32_t timeout_ms,
+	size_t max_read,
+	char **out,
+	size_t *out_len
+)
+{
+	ip_addr_t remote;
+	rp2350_tcp_ctx_t ctx;
+	absolute_time_t deadline;
+	size_t off = 0;
+
+	*out = NULL;
+	*out_len = 0;
+
+	if (!rp2350_wifi_init_once()) {
+		return false;
+	}
+	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
+		return false;
+	}
+	if (!rp2350_dns_resolve(host, timeout_ms, &remote)) {
+		return false;
+	}
+
+	memset(&ctx, 0, sizeof(ctx));
+	ctx.rx_cap = max_read;
+	ctx.rx = (char *)malloc(ctx.rx_cap + 1);
+	if (ctx.rx == NULL) {
+		return false;
+	}
+
+	deadline = make_timeout_time_ms(timeout_ms);
+
+	cyw43_arch_lwip_begin();
+	ctx.pcb = tcp_new_ip_type(IP_GET_TYPE(&remote));
+	if (ctx.pcb != NULL) {
+		tcp_arg(ctx.pcb, &ctx);
+		tcp_recv(ctx.pcb, rp2350_tcp_recv_cb);
+		tcp_err(ctx.pcb, rp2350_tcp_err_cb);
+		ctx.last_err = tcp_connect(ctx.pcb, &remote, port, rp2350_tcp_connected_cb);
+		if (ctx.last_err != ERR_OK) {
+			tcp_arg(ctx.pcb, NULL);
+			tcp_recv(ctx.pcb, NULL);
+			tcp_err(ctx.pcb, NULL);
+			tcp_abort(ctx.pcb);
+			ctx.pcb = NULL;
+		}
+	}
+	cyw43_arch_lwip_end();
+	if (ctx.pcb == NULL) {
+		free(ctx.rx);
+		return false;
+	}
+
+	if (!rp2350_lwip_wait_until(deadline, &ctx.connected) || ctx.had_error) {
+		rp2350_tcp_ctx_close(&ctx);
+		free(ctx.rx);
+		return false;
+	}
+
+	while (off < payload_len) {
+		bool wrote = false;
+		cyw43_arch_lwip_begin();
+		if (ctx.pcb != NULL) {
+			u16_t snd = tcp_sndbuf(ctx.pcb);
+			if (snd > 0) {
+				u16_t chunk = (u16_t)((payload_len - off) < snd ? (payload_len - off) : snd);
+				err_t w = tcp_write(ctx.pcb, payload + off, chunk, TCP_WRITE_FLAG_COPY);
+				if (w == ERR_OK) {
+					off += chunk;
+					(void)tcp_output(ctx.pcb);
+					wrote = true;
+				} else if (w != ERR_MEM) {
+					ctx.had_error = true;
+					ctx.last_err = w;
+				}
+			}
+		}
+		cyw43_arch_lwip_end();
+		if (ctx.had_error || ctx.pcb == NULL) {
+			rp2350_tcp_ctx_close(&ctx);
+			free(ctx.rx);
+			return false;
+		}
+		if (!wrote) {
+			if (time_reached(deadline)) {
+				rp2350_tcp_ctx_close(&ctx);
+				free(ctx.rx);
+				return false;
+			}
+			sleep_ms(1);
+		}
+	}
+
+	while (!ctx.done && !ctx.had_error) {
+		if (time_reached(deadline)) {
+			break;
+		}
+		sleep_ms(1);
+	}
+
+	rp2350_tcp_ctx_close(&ctx);
+	ctx.rx[ctx.rx_len] = '\0';
+	*out = ctx.rx;
+	*out_len = ctx.rx_len;
+	return true;
+}
+
+static bool rp2350_parse_http_url(const char *url, char *host, size_t host_size, u16_t *port, const char **path)
+{
+	const char *p;
+	const char *host_start;
+	size_t host_len;
+	unsigned long parsed_port = 80;
+	char *endptr;
+
+	if (strncmp(url, "http://", 7) != 0) {
+		return false;
+	}
+
+	p = url + 7;
+	host_start = p;
+	while (*p && *p != '/' && *p != ':') {
+		p++;
+	}
+	if (p == host_start) {
+		return false;
+	}
+
+	host_len = (size_t)(p - host_start);
+	if (host_len + 1 > host_size) {
+		return false;
+	}
+	memcpy(host, host_start, host_len);
+	host[host_len] = '\0';
+
+	if (*p == ':') {
+		const char *port_start = p + 1;
+		while (*p && *p != '/') {
+			p++;
+		}
+		{
+			size_t n = (size_t)(p - port_start);
+			char tmp[8];
+			if (n == 0 || n >= sizeof(tmp)) {
+				return false;
+			}
+			memcpy(tmp, port_start, n);
+			tmp[n] = '\0';
+			parsed_port = strtoul(tmp, &endptr, 10);
+			if (*endptr != '\0' || parsed_port == 0 || parsed_port > 65535) {
+				return false;
+			}
+		}
+	}
+
+	*port = (u16_t)parsed_port;
+	*path = (*p == '/') ? p : "/";
+	return true;
+}
+
+static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t max_read, char **body_out, size_t *body_len_out)
+{
+	char host[96];
+	u16_t port;
+	const char *path;
+	char *request = NULL;
+	size_t request_cap;
+	size_t request_len;
+	char *response = NULL;
+	size_t response_len = 0;
+	size_t i;
+	size_t body_off = 0;
+	size_t body_len;
+	char *body = NULL;
+
+	*body_out = NULL;
+	*body_len_out = 0;
+
+	if (!rp2350_parse_http_url(url, host, sizeof(host), &port, &path)) {
+		return false;
+	}
+
+	request_cap = strlen(path) + strlen(host) + 96;
+	request = (char *)malloc(request_cap);
+	if (!request) {
+		return false;
+	}
+	request_len = (size_t)snprintf(
+		request,
+		request_cap,
+		"GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+		path,
+		host
+	);
+
+	if (!rp2350_net_tcp_request(host, port, request, request_len, timeout_ms, max_read, &response, &response_len)) {
+		free(request);
+		return false;
+	}
+	free(request);
+
+	for (i = 0; i + 3 < response_len; i++) {
+		if (response[i] == '\r' && response[i + 1] == '\n' && response[i + 2] == '\r' && response[i + 3] == '\n') {
+			body_off = i + 4;
+			break;
+		}
+	}
+	if (body_off == 0) {
+		for (i = 0; i + 1 < response_len; i++) {
+			if (response[i] == '\n' && response[i + 1] == '\n') {
+				body_off = i + 2;
+				break;
+			}
+		}
+	}
+
+	body_len = (body_off < response_len) ? (response_len - body_off) : response_len;
+	body = (char *)malloc(body_len + 1);
+	if (!body) {
+		free(response);
+		return false;
+	}
+	memcpy(body, response + body_off, body_len);
+	body[body_len] = '\0';
+	free(response);
+
+	*body_out = body;
+	*body_len_out = body_len;
+	return true;
 }
 
 static void rp2350_zend_interrupt_handler(zend_execute_data *execute_data)
@@ -1085,10 +1327,8 @@ ZEND_FUNCTION(mcu_tcp_request)
 	size_t payload_len = 0;
 	zend_long timeout_ms = 5000;
 	zend_long max_read = 4096;
-	ip_addr_t remote;
-	rp2350_tcp_ctx_t ctx;
-	absolute_time_t deadline;
-	size_t off = 0;
+	char *resp = NULL;
+	size_t resp_len = 0;
 
 	ZEND_PARSE_PARAMETERS_START(3, 5)
 		Z_PARAM_STRING(host, host_len)
@@ -1116,97 +1356,20 @@ ZEND_FUNCTION(mcu_tcp_request)
 		max_read = 262144;
 	}
 
-	if (!rp2350_wifi_init_once()) {
+	if (!rp2350_net_tcp_request(
+		host,
+		(u16_t)port,
+		payload,
+		payload_len,
+		(uint32_t)timeout_ms,
+		(size_t)max_read,
+		&resp,
+		&resp_len
+	)) {
 		RETURN_FALSE;
 	}
-	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
-		RETURN_FALSE;
-	}
-	if (!rp2350_dns_resolve(host, (uint32_t)timeout_ms, &remote)) {
-		RETURN_FALSE;
-	}
-
-	memset(&ctx, 0, sizeof(ctx));
-	ctx.rx_cap = (size_t)max_read;
-	ctx.rx = (char *)malloc(ctx.rx_cap + 1);
-	if (ctx.rx == NULL) {
-		RETURN_FALSE;
-	}
-
-	deadline = make_timeout_time_ms((uint32_t)timeout_ms);
-
-	cyw43_arch_lwip_begin();
-	ctx.pcb = tcp_new_ip_type(IP_GET_TYPE(&remote));
-	if (ctx.pcb != NULL) {
-		tcp_arg(ctx.pcb, &ctx);
-		tcp_recv(ctx.pcb, rp2350_tcp_recv_cb);
-		tcp_err(ctx.pcb, rp2350_tcp_err_cb);
-		ctx.last_err = tcp_connect(ctx.pcb, &remote, (u16_t)port, rp2350_tcp_connected_cb);
-		if (ctx.last_err != ERR_OK) {
-			tcp_arg(ctx.pcb, NULL);
-			tcp_recv(ctx.pcb, NULL);
-			tcp_err(ctx.pcb, NULL);
-			tcp_abort(ctx.pcb);
-			ctx.pcb = NULL;
-		}
-	}
-	cyw43_arch_lwip_end();
-	if (ctx.pcb == NULL) {
-		free(ctx.rx);
-		RETURN_FALSE;
-	}
-
-	if (!rp2350_lwip_wait_until(deadline, &ctx.connected) || ctx.had_error) {
-		rp2350_tcp_ctx_close(&ctx);
-		free(ctx.rx);
-		RETURN_FALSE;
-	}
-
-	while (off < payload_len) {
-		bool wrote = false;
-		cyw43_arch_lwip_begin();
-		if (ctx.pcb != NULL) {
-			u16_t snd = tcp_sndbuf(ctx.pcb);
-			if (snd > 0) {
-				u16_t chunk = (u16_t)((payload_len - off) < snd ? (payload_len - off) : snd);
-				err_t w = tcp_write(ctx.pcb, payload + off, chunk, TCP_WRITE_FLAG_COPY);
-				if (w == ERR_OK) {
-					off += chunk;
-					(void)tcp_output(ctx.pcb);
-					wrote = true;
-				} else if (w != ERR_MEM) {
-					ctx.had_error = true;
-					ctx.last_err = w;
-				}
-			}
-		}
-		cyw43_arch_lwip_end();
-		if (ctx.had_error || ctx.pcb == NULL) {
-			rp2350_tcp_ctx_close(&ctx);
-			free(ctx.rx);
-			RETURN_FALSE;
-		}
-		if (!wrote) {
-			if (time_reached(deadline)) {
-				rp2350_tcp_ctx_close(&ctx);
-				free(ctx.rx);
-				RETURN_FALSE;
-			}
-			sleep_ms(1);
-		}
-	}
-
-	while (!ctx.done && !ctx.had_error) {
-		if (time_reached(deadline)) {
-			break;
-		}
-		sleep_ms(1);
-	}
-
-	rp2350_tcp_ctx_close(&ctx);
-	ctx.rx[ctx.rx_len] = '\0';
-	RETVAL_STRINGL(ctx.rx, ctx.rx_len);
-	free(ctx.rx);
+	RETVAL_STRINGL(resp, resp_len);
+	free(resp);
 }
 
 ZEND_FUNCTION(mcu_udp_sendto)
@@ -1544,13 +1707,46 @@ static zend_result rp2350_zend_stream_open(zend_file_handle *handle)
 	char path[192];
 	rp2350_vfs_stream_t *stream;
 	const rp2350_vfs_file_t *file;
+	char *http_body = NULL;
+	size_t http_body_len = 0;
+	const char *name = NULL;
 
 	rp2350_stream_open_seen = true;
 	if (!handle || !handle->filename) {
 		rp2350_stream_open_last_reason = "invalid-handle";
 		return FAILURE;
 	}
-	snprintf(rp2350_stream_open_last_in, sizeof(rp2350_stream_open_last_in), "%s", ZSTR_VAL(handle->filename));
+	name = ZSTR_VAL(handle->filename);
+	snprintf(rp2350_stream_open_last_in, sizeof(rp2350_stream_open_last_in), "%s", name);
+
+	if (strncmp(name, "http://", 7) == 0) {
+		snprintf(rp2350_stream_open_last_path, sizeof(rp2350_stream_open_last_path), "%s", name);
+		if (!rp2350_http_get_body(name, 8000, 131072, &http_body, &http_body_len)) {
+			rp2350_stream_open_last_reason = "http-fail";
+			return FAILURE;
+		}
+		stream = (rp2350_vfs_stream_t *)malloc(sizeof(*stream));
+		if (!stream) {
+			free(http_body);
+			rp2350_stream_open_last_reason = "malloc-fail";
+			return FAILURE;
+		}
+		stream->src = http_body;
+		stream->len = http_body_len;
+		stream->pos = 0;
+		stream->owned = true;
+
+		rp2350_stream_open_last_reason = "http-hit";
+		handle->type = ZEND_HANDLE_STREAM;
+		handle->handle.stream.handle = stream;
+		handle->handle.stream.isatty = 0;
+		handle->handle.stream.reader = rp2350_vfs_reader;
+		handle->handle.stream.fsizer = rp2350_vfs_fsizer;
+		handle->handle.stream.closer = rp2350_vfs_closer;
+		handle->opened_path = zend_string_init(name, strlen(name), 0);
+		return SUCCESS;
+	}
+
 	if (!rp2350_vfs_resolve_candidate(ZSTR_VAL(handle->filename), path, sizeof(path))) {
 		rp2350_stream_open_last_reason = "resolve-fail";
 		return FAILURE;
@@ -1572,6 +1768,7 @@ static zend_result rp2350_zend_stream_open(zend_file_handle *handle)
 	stream->src = file->source;
 	stream->len = file->len;
 	stream->pos = 0;
+	stream->owned = false;
 
 	handle->type = ZEND_HANDLE_STREAM;
 	handle->handle.stream.handle = stream;
@@ -1663,6 +1860,9 @@ static zend_string *rp2350_zend_resolve_path(zend_string *filename)
 
 	if (!filename) {
 		return NULL;
+	}
+	if (strncmp(ZSTR_VAL(filename), "http://", 7) == 0) {
+		return zend_string_copy(filename);
 	}
 	if (!rp2350_vfs_resolve_candidate(ZSTR_VAL(filename), path, sizeof(path))) {
 		return NULL;
