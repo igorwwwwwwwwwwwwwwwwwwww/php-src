@@ -310,6 +310,7 @@ tmp-php.ini
 /sapi/rp2350/third_party/
 /sapi/rp2350/php-rp2350
 /sapi/rp2350/php-rp2350.exe
+/sapi/rp2350/wifi.env
 
 # ------------------------------------------------------------------------------
 # Additional test build files

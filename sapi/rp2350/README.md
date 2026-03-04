@@ -10,6 +10,7 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 - Zend allocator now uses a PSRAM-backed `mmap()` arena (`rp2350_mmap.c`)
 - POSIX shims stub out unsupported host APIs
 - MCU builtins include button/LED helpers and EPD drawing helpers
+- MCU builtins now include Wi-Fi helpers (init/connect/disconnect/status/IP)
 - Zend observer runtime is disabled during bring-up to reduce crash surface
 - Embedded fake filesystem is enabled for script loading (`/main.php`, `/lib.php`, etc)
 - Board I/O via overridable weak symbols:
@@ -39,6 +40,7 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 | `rp2350_zend_optimizer_stub.c` | Optimizer no-ops |
 | `include/` | Compat headers: `sys/mman.h`, `dirent.h`, `rp2350_posix_compat.h`, `main/php_config.h` |
 | `boards/pimoroni_badger2350.h` | Board header (UART GPIO 4/5, PSRAM CS GPIO 8) |
+| `lwipopts.h` | lwIP configuration used by CYW43/Pico Wi-Fi stack |
 | `CMakeLists.txt` | Firmware build |
 | `main.php` | Embedded entry script |
 | `fetch-deps.sh` | Clone pico-sdk + picotool into `third_party/` |
@@ -102,6 +104,41 @@ cmake --build sapi/rp2350/build_badger -j8
 picotool load -x /Users/igor/code/php-src/sapi/rp2350/build_badger/php_mcu_firmware.uf2 -f
 picocom -b 115200 --imap lfcrlf /dev/cu.usbmodem101
 ```
+
+## Wi-Fi foundation
+
+Credentials source:
+- Place credentials in `sapi/rp2350/wifi.env`:
+  - `WIFI_SSID=YourSSID`
+  - `WIFI_PASS=YourPassword`
+- Quoted values are allowed (for spaces), e.g. `WIFI_SSID="Hot Signals In Your Area"`.
+- Rebuild after editing `wifi.env` so values are compiled into firmware.
+
+Current startup smoke path:
+- `main.php` reads `getenv('WIFI_SSID')` / `getenv('WIFI_PASS')`.
+- If SSID is non-empty, it runs Wi-Fi connect on boot and logs:
+  - `wifi:init`
+  - `wifi:ok:<0|1> status:<code> ip:<addr|none>`
+
+Exposed PHP APIs:
+- `mcu_wifi_init(): bool`
+- `mcu_wifi_connect(string $ssid, ?string $password = null, int $timeout_ms = 15000): bool`
+- `mcu_wifi_disconnect(): bool`
+- `mcu_wifi_status(): int`
+- `mcu_wifi_ip(): string|false`
+
+Wi-Fi status constants:
+- `MCU_WIFI_LINK_DOWN`
+- `MCU_WIFI_LINK_JOIN`
+- `MCU_WIFI_LINK_NOIP`
+- `MCU_WIFI_LINK_UP`
+- `MCU_WIFI_LINK_FAIL`
+- `MCU_WIFI_LINK_NONET`
+- `MCU_WIFI_LINK_BADAUTH`
+
+Current limitation:
+- This is connection/status/IP foundation only.
+- PHP stream/socket transport is still mostly stubbed in `src/rp2350_network_stubs.c`, so `ext/curl` and generic network streams are not wired yet.
 
 ## SWD debug (OpenOCD + GDB)
 

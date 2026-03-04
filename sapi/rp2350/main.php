@@ -39,8 +39,20 @@ $batt_pct = mcu_battery_level_from_voltage($batt_v);
 $prev_batt_pct = $batt_pct;
 $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
 
-/* Warning smoke test for UART formatting. */
-trigger_error('rp2350 warning smoke test', E_USER_WARNING);
+$wifi_ssid = getenv('WIFI_SSID');
+$wifi_pass = getenv('WIFI_PASS');
+if (is_string($wifi_ssid) && $wifi_ssid !== '') {
+    print "wifi:init\n";
+    $wifi_ok = mcu_wifi_connect($wifi_ssid, is_string($wifi_pass) ? $wifi_pass : null, 15000);
+    print "wifi:ok:";
+    print $wifi_ok ? "1" : "0";
+    print " status:";
+    print mcu_wifi_status();
+    print " ip:";
+    $wifi_ip = mcu_wifi_ip();
+    print is_string($wifi_ip) ? $wifi_ip : "none";
+    print "\n";
+}
 
 while (true) {
     $now_s = time();

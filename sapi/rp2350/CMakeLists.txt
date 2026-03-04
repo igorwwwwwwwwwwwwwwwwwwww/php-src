@@ -7,6 +7,31 @@ set(PICO_DEFAULT_UART "0" CACHE STRING "Default UART instance for stdio")
 set(PICO_DEFAULT_UART_TX_PIN "4" CACHE STRING "Default UART TX pin for stdio")
 set(PICO_DEFAULT_UART_RX_PIN "5" CACHE STRING "Default UART RX pin for stdio")
 set(RP2350_WAIT_FOR_USB_SERIAL_MS "10000" CACHE STRING "Wait up to this many milliseconds for USB CDC serial connection before boot logs (0 disables)")
+set(RP2350_WIFI_SSID "$ENV{WIFI_SSID}" CACHE STRING "Optional Wi-Fi SSID exposed via getenv('WIFI_SSID')")
+set(RP2350_WIFI_PASS "$ENV{WIFI_PASS}" CACHE STRING "Optional Wi-Fi password exposed via getenv('WIFI_PASS')")
+
+set(RP2350_DOTENV_PATH "${CMAKE_CURRENT_LIST_DIR}/wifi.env")
+if(EXISTS "${RP2350_DOTENV_PATH}")
+  file(STRINGS "${RP2350_DOTENV_PATH}" RP2350_DOTENV_LINES)
+  foreach(RP2350_DOTENV_LINE IN LISTS RP2350_DOTENV_LINES)
+    string(REGEX REPLACE "\r$" "" RP2350_DOTENV_LINE "${RP2350_DOTENV_LINE}")
+    if(RP2350_DOTENV_LINE MATCHES "^[ \t]*#" OR RP2350_DOTENV_LINE STREQUAL "")
+      continue()
+    endif()
+    if(RP2350_DOTENV_LINE MATCHES "^[ \t]*WIFI_SSID=(.*)$")
+      set(RP2350_WIFI_SSID "${CMAKE_MATCH_1}")
+      string(REGEX REPLACE "^\"(.*)\"$" "\\1" RP2350_WIFI_SSID "${RP2350_WIFI_SSID}")
+    elseif(RP2350_DOTENV_LINE MATCHES "^[ \t]*WIFI_PASS=(.*)$")
+      set(RP2350_WIFI_PASS "${CMAKE_MATCH_1}")
+      string(REGEX REPLACE "^\"(.*)\"$" "\\1" RP2350_WIFI_PASS "${RP2350_WIFI_PASS}")
+    endif()
+  endforeach()
+endif()
+
+string(REPLACE "\\" "\\\\" RP2350_WIFI_SSID_ESC "${RP2350_WIFI_SSID}")
+string(REPLACE "\"" "\\\"" RP2350_WIFI_SSID_ESC "${RP2350_WIFI_SSID_ESC}")
+string(REPLACE "\\" "\\\\" RP2350_WIFI_PASS_ESC "${RP2350_WIFI_PASS}")
+string(REPLACE "\"" "\\\"" RP2350_WIFI_PASS_ESC "${RP2350_WIFI_PASS_ESC}")
 
 if(NOT DEFINED PICO_SDK_PATH)
   set(PICO_SDK_PATH "${CMAKE_CURRENT_LIST_DIR}/third_party/pico-sdk")
@@ -214,12 +239,15 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   URI_STATIC_BUILD=1
   RP2350_FULL_STANDARD=1
   PICO_MALLOC_PANIC=0
+  RP2350_WIFI_SSID=\"${RP2350_WIFI_SSID_ESC}\"
+  RP2350_WIFI_PASS=\"${RP2350_WIFI_PASS_ESC}\"
   # Keep SRAM .heap modest; newlib sbrk is redirected to a PSRAM window.
   PICO_HEAP_SIZE=16384
 )
 
 target_link_libraries(php_mcu_firmware
   pico_stdlib
+  pico_cyw43_arch_lwip_threadsafe_background
   hardware_adc
   hardware_gpio
   hardware_i2c

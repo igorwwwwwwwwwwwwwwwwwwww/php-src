@@ -11,9 +11,12 @@
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/sem.h"
+#include "pico/cyw43_arch.h"
 #include "hardware/adc.h"
 #include "hardware/pwm.h"
 #include "hardware/sync.h"
+#include "lwip/ip4_addr.h"
+#include "lwip/netif.h"
 
 #include "Zend/zend.h"
 #include "Zend/zend_API.h"
@@ -50,11 +53,20 @@ static const char *rp2350_stream_open_last_reason = "none";
 static bool s_buttons_init = false;
 static bool s_leds_init = false;
 static bool s_power_sense_init = false;
+static bool s_wifi_init = false;
 static semaphore_t s_button_sem;
 static volatile uint32_t s_button_state_mask = 0;
 static volatile uint32_t s_button_irq_pending_mask = 0;
 static volatile uint32_t s_button_irq_generation = 0;
 static void (*s_prev_zend_interrupt_function)(zend_execute_data *execute_data) = NULL;
+#ifndef RP2350_WIFI_SSID
+#define RP2350_WIFI_SSID ""
+#endif
+#ifndef RP2350_WIFI_PASS
+#define RP2350_WIFI_PASS ""
+#endif
+static const char s_env_wifi_ssid[] = RP2350_WIFI_SSID;
+static const char s_env_wifi_pass[] = RP2350_WIFI_PASS;
 static const char rp2350_ini_entries[] =
 	"html_errors=0\n"
 	"display_errors=1\n"
@@ -154,6 +166,11 @@ ZEND_FUNCTION(mcu_battery_mv);
 ZEND_FUNCTION(mcu_usb_connected);
 ZEND_FUNCTION(mcu_battery_raw_vbat);
 ZEND_FUNCTION(mcu_battery_raw_vref);
+ZEND_FUNCTION(mcu_wifi_init);
+ZEND_FUNCTION(mcu_wifi_connect);
+ZEND_FUNCTION(mcu_wifi_disconnect);
+ZEND_FUNCTION(mcu_wifi_status);
+ZEND_FUNCTION(mcu_wifi_ip);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
@@ -217,6 +234,24 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_raw_vref, 0, 0, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_init, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_connect, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, ssid, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, password, IS_STRING, 1)
+	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_disconnect, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_status, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_wifi_ip, 0, 0, MAY_BE_STRING | MAY_BE_FALSE)
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_button_pressed, arginfo_mcu_button_pressed)
 	ZEND_FE(mcu_button_state_mask, arginfo_mcu_button_state_mask)
@@ -233,6 +268,11 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_usb_connected, arginfo_mcu_usb_connected)
 	ZEND_FE(mcu_battery_raw_vbat, arginfo_mcu_battery_raw_vbat)
 	ZEND_FE(mcu_battery_raw_vref, arginfo_mcu_battery_raw_vref)
+	ZEND_FE(mcu_wifi_init, arginfo_mcu_wifi_init)
+	ZEND_FE(mcu_wifi_connect, arginfo_mcu_wifi_connect)
+	ZEND_FE(mcu_wifi_disconnect, arginfo_mcu_wifi_disconnect)
+	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
+	ZEND_FE(mcu_wifi_ip, arginfo_mcu_wifi_ip)
 	ZEND_FE_END
 };
 
@@ -321,6 +361,19 @@ static void rp2350_power_sense_init(void)
 	gpio_disable_pulls(BW_VBUS_DETECT);
 
 	s_power_sense_init = true;
+}
+
+static bool rp2350_wifi_init_once(void)
+{
+	if (s_wifi_init) {
+		return true;
+	}
+	if (cyw43_arch_init() != 0) {
+		return false;
+	}
+	cyw43_arch_enable_sta_mode();
+	s_wifi_init = true;
+	return true;
 }
 
 static uint16_t rp2350_adc_read_avg(uint input, uint samples)
@@ -522,6 +575,13 @@ PHP_MINIT_FUNCTION(rp2350_mcu)
 	REGISTER_LONG_CONSTANT("MCU_LED_1", 1, CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("MCU_LED_2", 2, CONST_CS | CONST_PERSISTENT);
 	REGISTER_LONG_CONSTANT("MCU_LED_3", 3, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_WIFI_LINK_DOWN", CYW43_LINK_DOWN, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_WIFI_LINK_JOIN", CYW43_LINK_JOIN, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_WIFI_LINK_NOIP", CYW43_LINK_NOIP, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_WIFI_LINK_UP", CYW43_LINK_UP, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_WIFI_LINK_FAIL", CYW43_LINK_FAIL, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_WIFI_LINK_NONET", CYW43_LINK_NONET, CONST_CS | CONST_PERSISTENT);
+	REGISTER_LONG_CONSTANT("MCU_WIFI_LINK_BADAUTH", CYW43_LINK_BADAUTH, CONST_CS | CONST_PERSISTENT);
 
 	rp2350_leds_init();
 	rp2350_buttons_init();
@@ -739,6 +799,96 @@ ZEND_FUNCTION(mcu_battery_raw_vref)
 	RETURN_LONG((zend_long)rp2350_adc_read_avg(2u, 10u));
 }
 
+ZEND_FUNCTION(mcu_wifi_init)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	RETURN_BOOL(rp2350_wifi_init_once());
+}
+
+ZEND_FUNCTION(mcu_wifi_connect)
+{
+	char *ssid = NULL;
+	size_t ssid_len = 0;
+	char *password = NULL;
+	size_t password_len = 0;
+	zend_long timeout_ms = 15000;
+	uint32_t auth = CYW43_AUTH_OPEN;
+	int rc;
+
+	ZEND_PARSE_PARAMETERS_START(1, 3)
+		Z_PARAM_STRING(ssid, ssid_len)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_STRING_OR_NULL(password, password_len)
+		Z_PARAM_LONG(timeout_ms)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (ssid_len == 0) {
+		zend_argument_value_error(1, "must not be empty");
+		RETURN_THROWS();
+	}
+	if (timeout_ms < 0) {
+		timeout_ms = 0;
+	}
+	if (!rp2350_wifi_init_once()) {
+		RETURN_FALSE;
+	}
+
+	if (password != NULL && password_len > 0) {
+		auth = CYW43_AUTH_WPA2_AES_PSK;
+	}
+
+	rc = cyw43_arch_wifi_connect_timeout_ms(
+		ssid,
+		password,
+		auth,
+		(uint32_t)timeout_ms
+	);
+	RETURN_BOOL(rc == 0);
+}
+
+ZEND_FUNCTION(mcu_wifi_disconnect)
+{
+	int rc;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	if (!s_wifi_init) {
+		RETURN_TRUE;
+	}
+	rc = cyw43_wifi_leave(&cyw43_state, CYW43_ITF_STA);
+	RETURN_BOOL(rc == 0);
+}
+
+ZEND_FUNCTION(mcu_wifi_status)
+{
+	int status;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	if (!s_wifi_init) {
+		RETURN_LONG(CYW43_LINK_DOWN);
+	}
+	status = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+	RETURN_LONG(status);
+}
+
+ZEND_FUNCTION(mcu_wifi_ip)
+{
+	const ip4_addr_t *addr;
+	char text[IP4ADDR_STRLEN_MAX];
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	if (!s_wifi_init || netif_default == NULL) {
+		RETURN_FALSE;
+	}
+	addr = netif_ip4_addr(netif_default);
+	if (addr == NULL || ip4_addr_isany_val(*addr)) {
+		RETURN_FALSE;
+	}
+	if (ip4addr_ntoa_r(addr, text, sizeof(text)) == NULL) {
+		RETURN_FALSE;
+	}
+	RETURN_STRING(text);
+}
+
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)
 {
 	char line[384];
@@ -880,6 +1030,26 @@ static char *rp2350_sapi_read_cookies(void)
 	return NULL;
 }
 
+static char *rp2350_sapi_getenv(const char *name, size_t name_len)
+{
+	if (!name) {
+		return NULL;
+	}
+	if (name_len == (sizeof("WIFI_SSID") - 1) && memcmp(name, "WIFI_SSID", sizeof("WIFI_SSID") - 1) == 0) {
+		if (s_env_wifi_ssid[0] == '\0') {
+			return NULL;
+		}
+		return strdup(s_env_wifi_ssid);
+	}
+	if (name_len == (sizeof("WIFI_PASS") - 1) && memcmp(name, "WIFI_PASS", sizeof("WIFI_PASS") - 1) == 0) {
+		if (s_env_wifi_pass[0] == '\0') {
+			return NULL;
+		}
+		return strdup(s_env_wifi_pass);
+	}
+	return NULL;
+}
+
 static void rp2350_sapi_log_message(const char *message, int syslog_type_int)
 {
 	(void) syslog_type_int;
@@ -952,7 +1122,7 @@ static sapi_module_struct rp2350_sapi_module = {
 	rp2350_sapi_ub_write,
 	rp2350_sapi_flush,
 	NULL,
-	NULL,
+	rp2350_sapi_getenv,
 	php_error,
 	NULL,
 	NULL,
@@ -1097,13 +1267,6 @@ static void rp2350_zend_printf_to_smart_str(smart_str *buf, const char *format, 
 		}
 		smart_str_appendl(buf, line, (size_t) n);
 	}
-}
-
-static char *rp2350_zend_getenv(const char *name, size_t name_len)
-{
-	(void) name;
-	(void) name_len;
-	return NULL;
 }
 
 static zend_string *rp2350_zend_resolve_path(zend_string *filename)
