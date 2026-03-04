@@ -313,23 +313,17 @@ static void rp2350_buttons_init(void)
 		return;
 	}
 
+	/* Start from a deterministic state; first IRQ updates the live mask. */
+	s_button_state_mask = 0;
+	s_button_irq_pending_mask = 0;
+	s_button_irq_generation = 0;
+	sem_init(&s_button_sem, 0, 255);
+
 	for (i = 0; i < sizeof(gpios) / sizeof(gpios[0]); i++) {
 		uint32_t gpio = gpios[i];
 		gpio_init(gpio);
 		gpio_set_dir(gpio, GPIO_IN);
 		gpio_pull_up(gpio);
-		if (rp2350_button_gpio_is_pressed(gpio)) {
-			switch (gpio) {
-				case BW_SWITCH_A: s_button_state_mask |= (1u << 0); break;
-				case BW_SWITCH_B: s_button_state_mask |= (1u << 1); break;
-				case BW_SWITCH_C: s_button_state_mask |= (1u << 2); break;
-				case BW_SWITCH_UP: s_button_state_mask |= (1u << 3); break;
-				case BW_SWITCH_DOWN: s_button_state_mask |= (1u << 4); break;
-				case BW_SWITCH_HOME: s_button_state_mask |= (1u << 5); break;
-				case BW_RESET_SW: s_button_state_mask |= (1u << 6); break;
-				default: break;
-			}
-		}
 		if (!callback_set) {
 			gpio_set_irq_enabled_with_callback(
 				gpio,
@@ -343,9 +337,7 @@ static void rp2350_buttons_init(void)
 		}
 	}
 
-	sem_init(&s_button_sem, 0, 255);
 	s_buttons_init = true;
-	s_button_irq_pending_mask = 0xffffffffu; /* force initial LED sync on first interrupt check */
 }
 
 ZEND_FUNCTION(mcu_button_pressed)
