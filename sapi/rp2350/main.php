@@ -55,7 +55,7 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
 
 $mode_logo = false;
 $prev_mask = 0;
-$needs_redraw = true;
+$needs_redraw = false;
 $next_log_s = time() + 1;
 $led_mask = 0;
 $raw_vbat = mcu_battery_raw_vbat();
@@ -134,6 +134,26 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
     }
 }
 
+/* Initial render exactly once at boot. */
+redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
+
+/* Re-baseline after boot work (wifi/ntp/http can take time and shift state). */
+$raw_vbat = mcu_battery_raw_vbat();
+$raw_vref = mcu_battery_raw_vref();
+$batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
+$usb_connected = mcu_usb_connected();
+$batt_pct = mcu_battery_level_from_voltage($batt_v);
+$charging = mcu_is_charging_estimate($batt_v, $usb_connected);
+$wifi_status = mcu_wifi_status();
+$wifi_ip = mcu_wifi_ip();
+
+$prev_batt_pct = $batt_pct;
+$prev_usb_connected = $usb_connected;
+$prev_charging = $charging;
+$prev_wifi_status = $wifi_status;
+$prev_wifi_ip = $wifi_ip;
+$next_log_s = time() + 1;
+
 while (true) {
     $now_s = time();
     $remaining_ms = ($next_log_s - $now_s) * 1000;
@@ -173,11 +193,6 @@ while (true) {
         $prev_mask = $mask;
         $led_mask = $mask;
         if ($needs_redraw) {
-            $batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
-            $batt_pct = mcu_battery_level_from_voltage($batt_v);
-            $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
-            $wifi_status = mcu_wifi_status();
-            $wifi_ip = mcu_wifi_ip();
             redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
             $needs_redraw = false;
         }
@@ -198,15 +213,20 @@ while (true) {
     $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
     $wifi_status = mcu_wifi_status();
     $wifi_ip = mcu_wifi_ip();
-    if ($batt_pct !== $prev_batt_pct) {
+    if ($batt_pct !== $prev_batt_pct
+        || $usb_connected !== $prev_usb_connected
+        || $charging !== $prev_charging
+        || $wifi_status !== $prev_wifi_status
+        || $wifi_ip !== $prev_wifi_ip) {
         $needs_redraw = true;
         $prev_batt_pct = $batt_pct;
+        $prev_usb_connected = $usb_connected;
+        $prev_charging = $charging;
+        $prev_wifi_status = $wifi_status;
+        $prev_wifi_ip = $wifi_ip;
     }
 
     if ($needs_redraw) {
-        $batt_v = mcu_battery_voltage_from_raw($raw_vbat, $raw_vref);
-        $batt_pct = mcu_battery_level_from_voltage($batt_v);
-        $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
         redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
         $needs_redraw = false;
     }
