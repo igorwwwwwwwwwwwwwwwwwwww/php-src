@@ -154,6 +154,34 @@ set(RP2350_LEXBOR_SOURCES
   ${PHP_SRC_ROOT}/ext/lexbor/lexbor/unicode/unicode.c
   ${PHP_SRC_ROOT}/ext/lexbor/lexbor/url/url.c
 )
+set(RP2350_NGHTTP2_SOURCES
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_pq.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_map.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_queue.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_frame.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_buf.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_stream.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_outbound_item.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_session.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_submit.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_helper.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_alpn.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_hd.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_hd_huffman.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_hd_huffman_data.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_version.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_priority_spec.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_option.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_callbacks.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_mem.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_http.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_rcbuf.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_extpri.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_ratelim.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_time.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_debug.c
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/sfparse.c
+)
 
 add_executable(php_mcu_firmware
   src/main.c
@@ -206,6 +234,7 @@ add_executable(php_mcu_firmware
   ${RP2350_DATE_SOURCES}
   ${PHP_SRC_ROOT}/ext/lexbor/php_lexbor.c
   ${RP2350_LEXBOR_SOURCES}
+  ${RP2350_NGHTTP2_SOURCES}
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
 )
@@ -214,6 +243,11 @@ target_include_directories(php_mcu_firmware PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}
   ${CMAKE_CURRENT_LIST_DIR}/include
   ${CMAKE_CURRENT_BINARY_DIR}/generated
+  ${PICO_SDK_PATH}/lib/lwip/src/include/compat/posix
+  ${PICO_SDK_PATH}/lib/mbedtls/include
+  ${PICO_SDK_PATH}/lib/mbedtls/include/mbedtls
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/includes
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib
   ${PHP_SRC_ROOT}
   ${PHP_SRC_ROOT}/main
   ${PHP_SRC_ROOT}/TSRM
@@ -238,6 +272,8 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   URI_ENABLE_ANSI=1
   URI_NO_UNICODE=1
   URI_STATIC_BUILD=1
+  HAVE_ARPA_INET_H=1
+  BUILDING_NGHTTP2=1
   RP2350_FULL_STANDARD=1
   PICO_MALLOC_PANIC=0
   RP2350_WIFI_SSID=\"${RP2350_WIFI_SSID_ESC}\"
@@ -249,6 +285,8 @@ target_compile_definitions(php_mcu_firmware PRIVATE
 target_link_libraries(php_mcu_firmware
   pico_stdlib
   pico_cyw43_arch_lwip_threadsafe_background
+  pico_mbedtls
+  pico_lwip_mbedtls
   hardware_adc
   hardware_gpio
   hardware_i2c

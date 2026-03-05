@@ -24,6 +24,9 @@
 #include "lwip/pbuf.h"
 #include "lwip/err.h"
 #include "lwip/apps/http_client.h"
+#include "lwip/altcp_tls.h"
+#include "mbedtls/ssl.h"
+#include "nghttp2/nghttp2.h"
 
 #include "Zend/zend.h"
 #include "Zend/zend_API.h"
@@ -39,6 +42,7 @@
 #include "SAPI.h"
 #include "main/php_main.h"
 #include "main/php_globals.h"
+#include "main/php_memory_streams.h"
 #include "main/php_variables.h"
 #include "ext/standard/file.h"
 
@@ -61,6 +65,8 @@ static bool s_buttons_init = false;
 static bool s_leds_init = false;
 static bool s_power_sense_init = false;
 static bool s_wifi_init = false;
+static struct altcp_tls_config *s_http_tls_config = NULL;
+static bool s_nghttp2_smoke_logged = false;
 static semaphore_t s_button_sem;
 static volatile uint32_t s_button_state_mask = 0;
 static volatile uint32_t s_button_irq_pending_mask = 0;
@@ -83,6 +89,13 @@ static const char rp2350_ini_entries[] =
 	"date.timezone=UTC\n"
 	"max_execution_time=0\n"
 	"memory_limit=32M\n";
+
+extern int mbedtls_hardware_poll(void *data, unsigned char *output, size_t len, size_t *olen);
+
+int mbedtls_platform_entropy_poll(void *data, unsigned char *output, size_t len, size_t *olen)
+{
+	return mbedtls_hardware_poll(data, output, len, olen);
+}
 
 extern void php_printf_to_smart_string(smart_string *buf, const char *format, va_list ap);
 extern void php_printf_to_smart_str(smart_str *buf, const char *format, va_list ap);
@@ -699,7 +712,7 @@ bool rp2350_net_tcp_request(
 	return true;
 }
 
-static bool rp2350_parse_http_url(const char *url, char *host, size_t host_size, u16_t *port, const char **path)
+static bool rp2350_parse_http_url(const char *url, char *host, size_t host_size, u16_t *port, const char **path, bool *is_https)
 {
 	const char *p;
 	const char *host_start;
@@ -707,11 +720,17 @@ static bool rp2350_parse_http_url(const char *url, char *host, size_t host_size,
 	unsigned long parsed_port = 80;
 	char *endptr;
 
-	if (strncmp(url, "http://", 7) != 0) {
+	if (strncmp(url, "http://", 7) == 0) {
+		p = url + 7;
+		*is_https = false;
+		parsed_port = 80;
+	} else if (strncmp(url, "https://", 8) == 0) {
+		p = url + 8;
+		*is_https = true;
+		parsed_port = 443;
+	} else {
 		return false;
 	}
-
-	p = url + 7;
 	host_start = p;
 	while (*p && *p != '/' && *p != ':') {
 		p++;
@@ -758,10 +777,60 @@ typedef struct {
 	size_t cap;
 	volatile bool done;
 	bool truncated;
+	bool warned;
 	httpc_result_t result;
 	err_t lwip_err;
 	u32_t srv_res;
 } rp2350_httpc_ctx_t;
+
+typedef struct {
+	struct altcp_tls_config *config;
+	const char *hostname;
+} rp2350_tls_alloc_ctx_t;
+
+static struct altcp_pcb *rp2350_altcp_tls_alloc_with_sni(void *arg, u8_t ip_type)
+{
+	rp2350_tls_alloc_ctx_t *ctx = (rp2350_tls_alloc_ctx_t *)arg;
+	struct altcp_pcb *pcb;
+
+	if (!ctx || !ctx->config) {
+		return NULL;
+	}
+
+	pcb = altcp_tls_alloc(ctx->config, ip_type);
+	if (!pcb) {
+		return NULL;
+	}
+
+	if (ctx->hostname && ctx->hostname[0] != '\0') {
+		void *tls = altcp_tls_context(pcb);
+		if (tls) {
+			int rc = mbedtls_ssl_set_hostname((mbedtls_ssl_context *)tls, ctx->hostname);
+			if (rc != 0) {
+				php_error_docref(NULL, E_WARNING, "https SNI setup failed for host=%s mbedtls=%d", ctx->hostname, rc);
+			}
+		}
+	}
+
+	return pcb;
+}
+
+static const char *rp2350_httpc_result_name(httpc_result_t r)
+{
+	switch (r) {
+		case HTTPC_RESULT_OK: return "ok";
+		case HTTPC_RESULT_ERR_UNKNOWN: return "err_unknown";
+		case HTTPC_RESULT_ERR_CONNECT: return "err_connect";
+		case HTTPC_RESULT_ERR_HOSTNAME: return "err_hostname";
+		case HTTPC_RESULT_ERR_CLOSED: return "err_closed";
+		case HTTPC_RESULT_ERR_TIMEOUT: return "err_timeout";
+		case HTTPC_RESULT_ERR_SVR_RESP: return "err_svr_resp";
+		case HTTPC_RESULT_ERR_MEM: return "err_mem";
+		case HTTPC_RESULT_LOCAL_ABORT: return "local_abort";
+		case HTTPC_RESULT_ERR_CONTENT_LEN: return "err_content_len";
+		default: return "unknown";
+	}
+}
 
 static err_t rp2350_httpc_recv_cb(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t err)
 {
@@ -777,6 +846,10 @@ static err_t rp2350_httpc_recv_cb(void *arg, struct altcp_pcb *pcb, struct pbuf 
 		return ERR_OK;
 	}
 	if (err != ERR_OK) {
+		if (!ctx->warned) {
+			php_error_docref(NULL, E_WARNING, "http recv failed: lwip err=%d (%s)", (int)err, lwip_strerr(err));
+			ctx->warned = true;
+		}
 		if (p) {
 			pbuf_free(p);
 		}
@@ -817,8 +890,11 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	char host[96];
 	u16_t port;
 	const char *path;
+	bool is_https = false;
 	rp2350_httpc_ctx_t ctx;
 	httpc_connection_t settings;
+	altcp_allocator_t tls_allocator;
+	rp2350_tls_alloc_ctx_t tls_ctx;
 	httpc_state_t *conn = NULL;
 	err_t start_err;
 	absolute_time_t deadline;
@@ -826,7 +902,8 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	*body_out = NULL;
 	*body_len_out = 0;
 
-	if (!rp2350_parse_http_url(url, host, sizeof(host), &port, &path)) {
+	if (!rp2350_parse_http_url(url, host, sizeof(host), &port, &path, &is_https)) {
+		php_error_docref(NULL, E_WARNING, "http url parse failed: %s", url ? url : "<null>");
 		return false;
 	}
 
@@ -834,16 +911,35 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	ctx.cap = max_read;
 	ctx.buf = (char *)malloc(max_read + 1);
 	if (!ctx.buf) {
+		php_error_docref(NULL, E_WARNING, "http buffer alloc failed: cap=%u", (unsigned)max_read);
 		return false;
 	}
 
 	memset(&settings, 0, sizeof(settings));
 	settings.result_fn = rp2350_httpc_result_cb;
+	if (is_https) {
+		if (s_http_tls_config == NULL) {
+			s_http_tls_config = altcp_tls_create_config_client(NULL, 0);
+			if (s_http_tls_config == NULL) {
+				php_error_docref(NULL, E_WARNING, "https tls config alloc failed");
+				free(ctx.buf);
+				return false;
+			}
+		}
+		tls_ctx.config = s_http_tls_config;
+		tls_ctx.hostname = host;
+		tls_allocator.alloc = rp2350_altcp_tls_alloc_with_sni;
+		tls_allocator.arg = &tls_ctx;
+		settings.altcp_allocator = &tls_allocator;
+	}
 
 	cyw43_arch_lwip_begin();
 	start_err = httpc_get_file_dns(host, port, path, &settings, rp2350_httpc_recv_cb, &ctx, &conn);
 	cyw43_arch_lwip_end();
 	if (start_err != ERR_OK) {
+		php_error_docref(NULL, E_WARNING,
+			"http start failed: scheme=%s host=%s port=%u lwip err=%d (%s)",
+			is_https ? "https" : "http", host, (unsigned)port, (int)start_err, lwip_strerr(start_err));
 		free(ctx.buf);
 		return false;
 	}
@@ -851,6 +947,9 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	deadline = make_timeout_time_ms(timeout_ms);
 	while (!ctx.done) {
 		if (time_reached(deadline)) {
+			php_error_docref(NULL, E_WARNING,
+				"http timeout: scheme=%s host=%s port=%u path=%s",
+				is_https ? "https" : "http", host, (unsigned)port, path);
 			free(ctx.buf);
 			return false;
 		}
@@ -858,6 +957,21 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	}
 
 	if (ctx.result != HTTPC_RESULT_OK || ctx.lwip_err != ERR_OK) {
+		if (!ctx.warned) {
+			php_error_docref(NULL, E_WARNING,
+				"http failed: scheme=%s host=%s port=%u path=%s result=%s(%d) lwip=%d(%s) srv=%u trunc=%d len=%u",
+				is_https ? "https" : "http",
+				host,
+				(unsigned)port,
+				path,
+				rp2350_httpc_result_name(ctx.result),
+				(int)ctx.result,
+				(int)ctx.lwip_err,
+				lwip_strerr(ctx.lwip_err),
+				(unsigned)ctx.srv_res,
+				ctx.truncated ? 1 : 0,
+				(unsigned)ctx.len);
+		}
 		free(ctx.buf);
 		return false;
 	}
@@ -866,6 +980,89 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	*body_out = ctx.buf;
 	*body_len_out = ctx.len;
 	return true;
+}
+
+static php_stream *rp2350_http_stream_opener(
+	php_stream_wrapper *wrapper,
+	const char *filename,
+	const char *mode,
+	int options,
+	zend_string **opened_path,
+	php_stream_context *context STREAMS_DC
+)
+{
+	char *body = NULL;
+	size_t body_len = 0;
+	zend_string *zbody = NULL;
+	php_stream *stream = NULL;
+
+	(void)context;
+
+	if (!filename || (strncmp(filename, "http://", 7) != 0 && strncmp(filename, "https://", 8) != 0)) {
+		return NULL;
+	}
+	if (!mode || mode[0] != 'r' || mode[1] == '+') {
+		if (options & REPORT_ERRORS) {
+			php_error_docref(NULL, E_WARNING, "rp2350 http wrapper is read-only");
+		}
+		return NULL;
+	}
+
+	if (!rp2350_http_get_body(filename, 8000, 131072, &body, &body_len)) {
+		return NULL;
+	}
+
+	zbody = zend_string_init(body, body_len, 0);
+	free(body);
+	if (!zbody) {
+		return NULL;
+	}
+
+	stream = php_stream_memory_open(TEMP_STREAM_READONLY, zbody);
+	zend_string_release(zbody);
+	if (!stream) {
+		return NULL;
+	}
+	stream->wrapper = wrapper;
+
+	if (opened_path) {
+		*opened_path = zend_string_init(filename, strlen(filename), 0);
+	}
+	return stream;
+}
+
+static const php_stream_wrapper_ops rp2350_http_wrapper_ops = {
+	rp2350_http_stream_opener,
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	"rp2350_http_wrapper",
+	NULL,
+	NULL,
+	NULL,
+	NULL,
+	NULL
+};
+
+static php_stream_wrapper rp2350_http_wrapper = {
+	&rp2350_http_wrapper_ops,
+	NULL,
+	1
+};
+
+static void rp2350_register_https_wrapper_runtime(void)
+{
+	zend_string *protocol = zend_string_init("https", sizeof("https") - 1, 0);
+	if (!protocol) {
+		php_error_docref(NULL, E_WARNING, "failed to allocate https protocol string");
+		return;
+	}
+	(void)php_unregister_url_stream_wrapper_volatile(protocol);
+	if (php_register_url_stream_wrapper_volatile(protocol, &rp2350_http_wrapper) != SUCCESS) {
+		php_error_docref(NULL, E_WARNING, "failed to register https stream wrapper");
+	}
+	zend_string_release(protocol);
 }
 
 static void rp2350_zend_interrupt_handler(zend_execute_data *execute_data)
@@ -1972,6 +2169,11 @@ int rp2350_eval_startup(void)
 		rp2350_eval_error = "php_module_startup failed";
 		return -1;
 	}
+	if (!s_nghttp2_smoke_logged) {
+		const nghttp2_info *info = nghttp2_version(0);
+		printf("[boot] nghttp2 %s\n", info ? info->version_str : "<null>");
+		s_nghttp2_smoke_logged = true;
+	}
 
 	s_prev_zend_interrupt_function = zend_interrupt_function;
 	zend_interrupt_function = rp2350_zend_interrupt_handler;
@@ -2027,6 +2229,7 @@ int rp2350_eval_execute_file(const char *path)
 		rp2350_eval_error = "php_request_startup failed";
 		return -1;
 	}
+	rp2350_register_https_wrapper_runtime();
 	rp2350_force_plain_errors_runtime();
 	/* Our minimal config stubs don't seed this; zero leads to fread/fgetc zero-byte reads. */
 	FG(def_chunk_size) = 8192;

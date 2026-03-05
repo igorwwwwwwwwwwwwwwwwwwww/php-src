@@ -6,6 +6,7 @@ THIRD_PARTY_DIR="${FIRMWARE_DIR}/third_party"
 
 PICO_SDK_REF="${PICO_SDK_REF:-master}"
 PICOTOOL_REF="${PICOTOOL_REF:-master}"
+NGHTTP2_REF="${NGHTTP2_REF:-master}"
 
 mkdir -p "${THIRD_PARTY_DIR}"
 
@@ -24,10 +25,18 @@ else
   git -C "${THIRD_PARTY_DIR}/picotool" checkout FETCH_HEAD
 fi
 
+if [[ ! -d "${THIRD_PARTY_DIR}/nghttp2/.git" ]]; then
+  git clone --depth 1 --branch "${NGHTTP2_REF}" https://github.com/nghttp2/nghttp2.git "${THIRD_PARTY_DIR}/nghttp2"
+else
+  git -C "${THIRD_PARTY_DIR}/nghttp2" fetch origin "${NGHTTP2_REF}" --depth 1
+  git -C "${THIRD_PARTY_DIR}/nghttp2" checkout FETCH_HEAD
+fi
+
 cat <<'MSG'
 Dependencies are available in:
   sapi/rp2350/third_party/pico-sdk
   sapi/rp2350/third_party/picotool
+  sapi/rp2350/third_party/nghttp2
 
 Next:
   cmake -S sapi/rp2350 -B sapi/rp2350/build -DPICO_BOARD=pico2

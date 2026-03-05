@@ -96,7 +96,7 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
             print "\n";
         }
 
-        $http = @file_get_contents('http://example.com/');
+        $http = file_get_contents('http://example.com/');
         if ($http === false) {
             print "http:wrapper:fail\n";
         } else {
@@ -104,6 +104,17 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
             print strlen($http);
             print " head:";
             print substr($http, 0, 24);
+            print "\n";
+        }
+
+        $https = file_get_contents('https://example.com/');
+        if ($https === false) {
+            print "https:wrapper:fail\n";
+        } else {
+            print "https:wrapper:ok len:";
+            print strlen($https);
+            print " head:";
+            print substr($https, 0, 24);
             print "\n";
         }
     }
