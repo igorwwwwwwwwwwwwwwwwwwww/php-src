@@ -6,7 +6,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
-#include <sys/time.h>
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
@@ -202,7 +201,6 @@ ZEND_FUNCTION(mcu_wifi_disconnect);
 ZEND_FUNCTION(mcu_wifi_status);
 ZEND_FUNCTION(mcu_wifi_ip);
 ZEND_FUNCTION(mcu_ntp_sync);
-ZEND_FUNCTION(mcu_set_time);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
@@ -289,10 +287,6 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_ntp_sync, 0, 0, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_set_time, 0, 1, _IS_BOOL, 0)
-	ZEND_ARG_TYPE_INFO(0, unix_time, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_button_pressed, arginfo_mcu_button_pressed)
 	ZEND_FE(mcu_button_state_mask, arginfo_mcu_button_state_mask)
@@ -315,7 +309,6 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
 	ZEND_FE(mcu_wifi_ip, arginfo_mcu_wifi_ip)
 	ZEND_FE(mcu_ntp_sync, arginfo_mcu_ntp_sync)
-	ZEND_FE(mcu_set_time, arginfo_mcu_set_time)
 	ZEND_FE_END
 };
 
@@ -955,26 +948,6 @@ ZEND_FUNCTION(mcu_ntp_sync)
 	s_sntp_server[server_len] = '\0';
 	RETURN_BOOL(rp2350_sntp_sync_once(s_sntp_server, (uint32_t)timeout_ms));
 }
-
-ZEND_FUNCTION(mcu_set_time)
-{
-	zend_long unix_time = 0;
-	struct timeval tv;
-
-	ZEND_PARSE_PARAMETERS_START(1, 1)
-		Z_PARAM_LONG(unix_time)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (unix_time < 0) {
-		zend_argument_value_error(1, "must be >= 0");
-		RETURN_THROWS();
-	}
-
-	tv.tv_sec = (time_t)unix_time;
-	tv.tv_usec = 0;
-	RETURN_BOOL(settimeofday(&tv, NULL) == 0);
-}
-
 
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)
 {

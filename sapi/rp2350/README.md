@@ -128,6 +128,11 @@ Exposed PHP APIs:
 - `mcu_wifi_ip(): string|false`
 - `mcu_ntp_sync(?string $server = "pool.ntp.org", int $timeout_ms = 15000): bool`
 
+Time bootstrap / TLS note:
+- Manual wall-clock set (`mcu_set_time`) is intentionally removed.
+- Time is now expected to come from RTC-on-boot plus NTP (`mcu_ntp_sync`).
+- If both are unavailable/incorrect, TLS certificate validation may fail until time is corrected.
+
 Wi-Fi status constants:
 - `MCU_WIFI_LINK_DOWN`
 - `MCU_WIFI_LINK_JOIN`
