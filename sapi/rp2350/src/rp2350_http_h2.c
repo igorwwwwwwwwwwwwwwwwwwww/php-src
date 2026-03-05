@@ -1,22 +1,19 @@
-typedef struct {
-	char *tx;
-	size_t tx_len;
-	size_t tx_cap;
-	size_t tx_off;
-	char *body;
-	size_t body_len;
-	size_t body_cap;
-	size_t body_limit;
-	bool body_dynamic;
-	bool body_truncated;
-	int status_code;
-	int32_t stream_id;
-	bool stream_closed;
-	uint32_t stream_error_code;
-	char *req_body;
-	size_t req_body_len;
-	size_t req_body_off;
-} rp2350_h2_ctx_t;
+#include <string.h>
+#include <stdlib.h>
+
+#include "pico/stdlib.h"
+#include "pico/time.h"
+#include "pico/cyw43_arch.h"
+#include "lwip/ip_addr.h"
+#include "lwip/altcp.h"
+#include "lwip/altcp_tls.h"
+#include "mbedtls/ssl.h"
+#include "nghttp2/nghttp2.h"
+
+#include "SAPI.h"
+
+#include "rp2350_http_internal.h"
+#include "rp2350_wifi.h"
 
 static bool rp2350_h2_buf_append(char **buf, size_t *len, size_t *cap, const uint8_t *src, size_t n)
 {
@@ -52,7 +49,7 @@ static bool rp2350_h2_buf_append(char **buf, size_t *len, size_t *cap, const uin
 	return true;
 }
 
-static ssize_t rp2350_h2_send_cb(nghttp2_session *session, const uint8_t *data, size_t length, int flags, void *user_data)
+ssize_t rp2350_h2_send_cb(nghttp2_session *session, const uint8_t *data, size_t length, int flags, void *user_data)
 {
 	rp2350_h2_ctx_t *ctx = (rp2350_h2_ctx_t *)user_data;
 	(void)session;
@@ -63,7 +60,7 @@ static ssize_t rp2350_h2_send_cb(nghttp2_session *session, const uint8_t *data, 
 	return (ssize_t)length;
 }
 
-static ssize_t rp2350_h2_read_data_cb(
+ssize_t rp2350_h2_read_data_cb(
 	nghttp2_session *session,
 	int32_t stream_id,
 	uint8_t *buf,
@@ -95,7 +92,7 @@ static ssize_t rp2350_h2_read_data_cb(
 	return (ssize_t)n;
 }
 
-static int rp2350_h2_on_header_cb(nghttp2_session *session, const nghttp2_frame *frame, const uint8_t *name, size_t namelen, const uint8_t *value, size_t valuelen, uint8_t flags, void *user_data)
+int rp2350_h2_on_header_cb(nghttp2_session *session, const nghttp2_frame *frame, const uint8_t *name, size_t namelen, const uint8_t *value, size_t valuelen, uint8_t flags, void *user_data)
 {
 	rp2350_h2_ctx_t *ctx = (rp2350_h2_ctx_t *)user_data;
 	(void)session;
@@ -117,7 +114,7 @@ static int rp2350_h2_on_header_cb(nghttp2_session *session, const nghttp2_frame 
 	return 0;
 }
 
-static int rp2350_h2_on_data_chunk_recv_cb(nghttp2_session *session, uint8_t flags, int32_t stream_id, const uint8_t *data, size_t len, void *user_data)
+int rp2350_h2_on_data_chunk_recv_cb(nghttp2_session *session, uint8_t flags, int32_t stream_id, const uint8_t *data, size_t len, void *user_data)
 {
 	rp2350_h2_ctx_t *ctx = (rp2350_h2_ctx_t *)user_data;
 	size_t avail;
@@ -163,7 +160,7 @@ static int rp2350_h2_on_data_chunk_recv_cb(nghttp2_session *session, uint8_t fla
 	return 0;
 }
 
-static int rp2350_h2_on_stream_close_cb(nghttp2_session *session, int32_t stream_id, uint32_t error_code, void *user_data)
+int rp2350_h2_on_stream_close_cb(nghttp2_session *session, int32_t stream_id, uint32_t error_code, void *user_data)
 {
 	rp2350_h2_ctx_t *ctx = (rp2350_h2_ctx_t *)user_data;
 	(void)session;
@@ -174,7 +171,7 @@ static int rp2350_h2_on_stream_close_cb(nghttp2_session *session, int32_t stream
 	return 0;
 }
 
-static bool rp2350_h2_flush_tx(rp2350_h2_ctx_t *h2, rp2350_altcp_ctx_t *net, absolute_time_t deadline)
+bool rp2350_h2_flush_tx(rp2350_h2_ctx_t *h2, rp2350_altcp_ctx_t *net, absolute_time_t deadline)
 {
 	while (h2->tx_off < h2->tx_len) {
 		bool progressed = false;
@@ -241,7 +238,7 @@ static struct altcp_pcb *rp2350_h2_tls_alloc_with_sni(void *arg, u8_t ip_type)
 	return pcb;
 }
 
-static err_t rp2350_h2_altcp_connected_cb(void *arg, struct altcp_pcb *conn, err_t err)
+err_t rp2350_h2_altcp_connected_cb(void *arg, struct altcp_pcb *conn, err_t err)
 {
 	rp2350_altcp_ctx_t *ctx = (rp2350_altcp_ctx_t *)arg;
 	(void)conn;
@@ -258,7 +255,7 @@ static err_t rp2350_h2_altcp_connected_cb(void *arg, struct altcp_pcb *conn, err
 	return ERR_OK;
 }
 
-static err_t rp2350_h2_altcp_recv_cb(void *arg, struct altcp_pcb *conn, struct pbuf *p, err_t err)
+err_t rp2350_h2_altcp_recv_cb(void *arg, struct altcp_pcb *conn, struct pbuf *p, err_t err)
 {
 	rp2350_altcp_ctx_t *ctx = (rp2350_altcp_ctx_t *)arg;
 	size_t avail;
@@ -306,7 +303,7 @@ static err_t rp2350_h2_altcp_recv_cb(void *arg, struct altcp_pcb *conn, struct p
 	return ERR_OK;
 }
 
-static void rp2350_h2_altcp_err_cb(void *arg, err_t err)
+void rp2350_h2_altcp_err_cb(void *arg, err_t err)
 {
 	rp2350_altcp_ctx_t *ctx = (rp2350_altcp_ctx_t *)arg;
 	if (!ctx) {
@@ -318,7 +315,7 @@ static void rp2350_h2_altcp_err_cb(void *arg, err_t err)
 	ctx->done = true;
 }
 
-static void rp2350_h2_altcp_close(rp2350_altcp_ctx_t *ctx)
+void rp2350_h2_altcp_close(rp2350_altcp_ctx_t *ctx)
 {
 	if (!ctx || !ctx->pcb) {
 		return;
@@ -467,7 +464,7 @@ static bool rp2350_net_tls_request(
 	return true;
 }
 
-static bool rp2350_h2_get_body_ex(
+bool rp2350_h2_get_body_ex(
 	const char *url,
 	uint32_t timeout_ms,
 	size_t max_read,

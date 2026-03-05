@@ -1,4 +1,54 @@
-static bool rp2350_http_h1_extract_body(
+#include <string.h>
+#include <stdlib.h>
+
+#include "pico/stdlib.h"
+#include "pico/time.h"
+#include "pico/cyw43_arch.h"
+#include "lwip/ip_addr.h"
+#include "lwip/altcp.h"
+#include "lwip/altcp_tls.h"
+#include "mbedtls/ssl.h"
+#include "picohttpparser.h"
+
+#include "SAPI.h"
+
+#include "rp2350_eval.h"
+#include "rp2350_http_internal.h"
+#include "rp2350_wifi.h"
+
+typedef struct {
+	struct altcp_tls_config *config;
+	const char *hostname;
+} rp2350_tls_alloc_ctx_t;
+
+static struct altcp_pcb *rp2350_altcp_tls_alloc_with_sni(void *arg, u8_t ip_type)
+{
+	rp2350_tls_alloc_ctx_t *ctx = (rp2350_tls_alloc_ctx_t *)arg;
+	struct altcp_pcb *pcb;
+
+	if (!ctx || !ctx->config) {
+		return NULL;
+	}
+
+	pcb = altcp_tls_alloc(ctx->config, ip_type);
+	if (!pcb) {
+		return NULL;
+	}
+
+	if (ctx->hostname && ctx->hostname[0] != '\0') {
+		void *tls = altcp_tls_context(pcb);
+		if (tls) {
+			int rc = mbedtls_ssl_set_hostname((mbedtls_ssl_context *)tls, ctx->hostname);
+			if (rc != 0) {
+				php_error_docref(NULL, E_WARNING, "https SNI setup failed for host=%s mbedtls=%d", ctx->hostname, rc);
+			}
+		}
+	}
+
+	return pcb;
+}
+
+bool rp2350_http_h1_extract_body(
 	const char *resp,
 	size_t resp_len,
 	size_t max_read,
@@ -52,7 +102,7 @@ static bool rp2350_http_h1_extract_body(
 	return true;
 }
 
-static bool rp2350_net_tls_request_http1(
+bool rp2350_net_tls_request_http1(
 	const char *host,
 	u16_t port,
 	const char *payload,

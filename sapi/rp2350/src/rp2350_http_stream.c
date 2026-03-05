@@ -34,11 +34,11 @@
 #include "src/rp2350_ca_bundle.h"
 #include "rp2350_eval.h"
 #include "rp2350_http_stream.h"
+#include "rp2350_http_internal.h"
 #include "rp2350_wifi.h"
 
-static struct altcp_tls_config *s_http_tls_config = NULL;
-static struct altcp_tls_config *s_h2_tls_config = NULL;
-static bool rp2350_parse_http_url(const char *url, char *host, size_t host_size, u16_t *port, const char **path, bool *is_https);
+struct altcp_tls_config *s_http_tls_config = NULL;
+struct altcp_tls_config *s_h2_tls_config = NULL;
 static struct altcp_pcb *rp2350_altcp_tls_alloc_with_sni(void *arg, u8_t ip_type);
 bool rp2350_http_tls_config_ready(void)
 {
@@ -100,19 +100,6 @@ typedef struct {
 	err_t last_err;
 } rp2350_tcp_ctx_t;
 
-typedef struct {
-	struct altcp_pcb *pcb;
-	char *rx;
-	size_t rx_len;
-	size_t rx_cap;
-	absolute_time_t last_rx_time;
-	volatile bool connected;
-	volatile bool done;
-	volatile bool had_error;
-	volatile bool truncated;
-	err_t last_err;
-} rp2350_altcp_ctx_t;
-
 static void rp2350_dns_found_cb(const char *name, const ip_addr_t *ipaddr, void *arg)
 {
 	rp2350_dns_query_t *q = (rp2350_dns_query_t *)arg;
@@ -127,7 +114,7 @@ static void rp2350_dns_found_cb(const char *name, const ip_addr_t *ipaddr, void 
 	q->done = true;
 }
 
-static bool rp2350_lwip_wait_until(absolute_time_t deadline, volatile bool *flag)
+bool rp2350_lwip_wait_until(absolute_time_t deadline, volatile bool *flag)
 {
 	while (!(*flag)) {
 		if (time_reached(deadline)) {
@@ -138,7 +125,7 @@ static bool rp2350_lwip_wait_until(absolute_time_t deadline, volatile bool *flag
 	return true;
 }
 
-static bool rp2350_dns_resolve(const char *host, uint32_t timeout_ms, ip_addr_t *out_addr)
+bool rp2350_dns_resolve(const char *host, uint32_t timeout_ms, ip_addr_t *out_addr)
 {
 	rp2350_dns_query_t q;
 	err_t err;
@@ -370,10 +357,7 @@ bool rp2350_net_tcp_request(
 	return true;
 }
 
-#include "rp2350_http_h2.c"
-
-
-static bool rp2350_parse_http_url(const char *url, char *host, size_t host_size, u16_t *port, const char **path, bool *is_https)
+bool rp2350_parse_http_url(const char *url, char *host, size_t host_size, u16_t *port, const char **path, bool *is_https)
 {
 	const char *p;
 	const char *host_start;
@@ -463,16 +447,6 @@ static struct altcp_pcb *rp2350_altcp_tls_alloc_with_sni(void *arg, u8_t ip_type
 
 	return pcb;
 }
-
-typedef struct {
-	char method[16];
-	char *headers;
-	size_t headers_len;
-	char *content;
-	size_t content_len;
-	char *user_agent;
-	uint32_t timeout_ms;
-} rp2350_http_request_opts_t;
 
 static void rp2350_http_request_opts_init(rp2350_http_request_opts_t *opts)
 {
@@ -797,9 +771,6 @@ static bool rp2350_http_build_request(
 	zend_string_release(zs);
 	return true;
 }
-
-#include "rp2350_http_h1.c"
-
 
 bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t max_read, char **body_out, size_t *body_len_out)
 {
@@ -1128,7 +1099,7 @@ static php_stream *rp2350_http_stream_opener(
 	absolute_time_t deadline;
 	rp2350_http_stream_data_t *st = NULL;
 	altcp_allocator_t tls_allocator = {0};
-	rp2350_h2_tls_alloc_ctx_t tls_ctx = {0};
+	rp2350_tls_alloc_ctx_t tls_ctx = {0};
 	php_stream *stream = NULL;
 	const char *alpn = NULL;
 	int connect_attempt = 0;
@@ -1194,7 +1165,7 @@ static php_stream *rp2350_http_stream_opener(
 	if (is_https) {
 		tls_ctx.config = s_h2_tls_config;
 		tls_ctx.hostname = host;
-		tls_allocator.alloc = rp2350_h2_tls_alloc_with_sni;
+		tls_allocator.alloc = rp2350_altcp_tls_alloc_with_sni;
 		tls_allocator.arg = &tls_ctx;
 	}
 
