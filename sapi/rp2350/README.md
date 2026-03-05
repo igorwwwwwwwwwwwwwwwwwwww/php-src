@@ -270,6 +270,9 @@ Allocator notes:
 - Clarify lwIP source layering:
   - Document exactly which files are consumed from `third_party/pico-sdk/lib/lwip/src` vs `third_party/pico-sdk/src/rp2_common/pico_lwip`.
   - Capture why the RP2 common shim layer overrides/wraps parts of upstream lwIP and where to patch TLS behavior safely.
+- Re-evaluate HTTP client dependency strategy:
+  - Revisit whether to keep custom wrapper stack or move toward a higher-level client library (`libcurl` / `wget2`-class) once memory/runtime constraints are better characterized.
+  - Compare integration cost vs feature coverage (redirects, auth, richer stream context support, protocol breadth).
 - Firmware-visible error signaling:
   - Blink a dedicated LED pattern on PHP warning/error/fatal paths so failures are visible without UART attached.
   - Define stable severity-to-pattern mapping (warning vs fatal) and avoid blocking critical loops.

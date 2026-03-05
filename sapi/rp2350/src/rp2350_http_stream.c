@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #include "pico/stdlib.h"
 #include "pico/time.h"
@@ -384,6 +385,9 @@ typedef struct {
 	int32_t stream_id;
 	bool stream_closed;
 	uint32_t stream_error_code;
+	char *req_body;
+	size_t req_body_len;
+	size_t req_body_off;
 } rp2350_h2_ctx_t;
 
 static bool rp2350_h2_buf_append(char **buf, size_t *len, size_t *cap, const uint8_t *src, size_t n)
@@ -429,6 +433,38 @@ static ssize_t rp2350_h2_send_cb(nghttp2_session *session, const uint8_t *data, 
 		return NGHTTP2_ERR_CALLBACK_FAILURE;
 	}
 	return (ssize_t)length;
+}
+
+static ssize_t rp2350_h2_read_data_cb(
+	nghttp2_session *session,
+	int32_t stream_id,
+	uint8_t *buf,
+	size_t length,
+	uint32_t *data_flags,
+	nghttp2_data_source *source,
+	void *user_data
+)
+{
+	rp2350_h2_ctx_t *ctx = (rp2350_h2_ctx_t *)user_data;
+	size_t remain;
+	size_t n;
+	(void)session;
+	(void)stream_id;
+	(void)source;
+
+	if (!ctx || !ctx->req_body || ctx->req_body_off >= ctx->req_body_len) {
+		*data_flags |= NGHTTP2_DATA_FLAG_EOF;
+		return 0;
+	}
+
+	remain = ctx->req_body_len - ctx->req_body_off;
+	n = remain < length ? remain : length;
+	memcpy(buf, ctx->req_body + ctx->req_body_off, n);
+	ctx->req_body_off += n;
+	if (ctx->req_body_off >= ctx->req_body_len) {
+		*data_flags |= NGHTTP2_DATA_FLAG_EOF;
+	}
+	return (ssize_t)n;
 }
 
 static int rp2350_h2_on_header_cb(nghttp2_session *session, const nghttp2_frame *frame, const uint8_t *name, size_t namelen, const uint8_t *value, size_t valuelen, uint8_t flags, void *user_data)
@@ -1178,34 +1214,337 @@ static struct altcp_pcb *rp2350_altcp_tls_alloc_with_sni(void *arg, u8_t ip_type
 	return pcb;
 }
 
-static bool rp2350_http_build_get_request(const char *host, const char *path, char **req_out, size_t *req_len_out)
-{
-	int n;
-	char *req;
+typedef struct {
+	char method[16];
+	char *headers;
+	size_t headers_len;
+	char *content;
+	size_t content_len;
+	char *user_agent;
+	uint32_t timeout_ms;
+} rp2350_http_request_opts_t;
 
-	n = snprintf(
-		NULL,
-		0,
-		"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: rp2350-php\r\nAccept: */*\r\n\r\n",
-		path,
-		host
-	);
-	if (n <= 0) {
+static void rp2350_http_request_opts_init(rp2350_http_request_opts_t *opts)
+{
+	memset(opts, 0, sizeof(*opts));
+	memcpy(opts->method, "GET", 4);
+	opts->timeout_ms = 8000;
+}
+
+static void rp2350_http_request_opts_cleanup(rp2350_http_request_opts_t *opts)
+{
+	free(opts->headers);
+	opts->headers = NULL;
+	opts->headers_len = 0;
+	free(opts->content);
+	opts->content = NULL;
+	opts->content_len = 0;
+	free(opts->user_agent);
+	opts->user_agent = NULL;
+}
+
+static bool rp2350_strdup_from_zval(zval *zv, char **out, size_t *len_out)
+{
+	zend_string *zs;
+	char *dup;
+	size_t len;
+
+	if (!zv || !out || !len_out) {
 		return false;
 	}
-	req = (char *)malloc((size_t)n + 1);
-	if (!req) {
+
+	zs = zval_get_string(zv);
+	if (!zs) {
 		return false;
 	}
-	snprintf(
-		req,
-		(size_t)n + 1,
-		"GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\nUser-Agent: rp2350-php\r\nAccept: */*\r\n\r\n",
-		path,
-		host
-	);
-	*req_out = req;
-	*req_len_out = (size_t)n;
+
+	len = ZSTR_LEN(zs);
+	dup = (char *)malloc(len + 1);
+	if (!dup) {
+		zend_string_release(zs);
+		return false;
+	}
+	memcpy(dup, ZSTR_VAL(zs), len);
+	dup[len] = '\0';
+	*out = dup;
+	*len_out = len;
+	zend_string_release(zs);
+	return true;
+}
+
+static bool rp2350_parse_http_context(
+	php_stream_context *context,
+	rp2350_http_request_opts_t *opts,
+	php_stream_wrapper *wrapper,
+	int options
+)
+{
+	zval *tmp;
+
+	if (!context) {
+		return true;
+	}
+
+	tmp = php_stream_context_get_option(context, "http", "method");
+	if (tmp != NULL) {
+		char *method = NULL;
+		size_t method_len = 0;
+		size_t i;
+
+		if (!rp2350_strdup_from_zval(tmp, &method, &method_len)) {
+			php_stream_wrapper_log_error(wrapper, options, "context parse failed: method");
+			return false;
+		}
+		if (method_len == 0 || method_len >= sizeof(opts->method)) {
+			free(method);
+			php_stream_wrapper_log_error(wrapper, options, "context invalid method");
+			return false;
+		}
+		for (i = 0; i < method_len; i++) {
+			opts->method[i] = (char)toupper((unsigned char)method[i]);
+		}
+		opts->method[method_len] = '\0';
+		free(method);
+	}
+
+	tmp = php_stream_context_get_option(context, "http", "timeout");
+	if (tmp != NULL) {
+		double timeout_s = zval_get_double(tmp);
+		if (timeout_s > 0.0) {
+			double timeout_ms_d = timeout_s * 1000.0;
+			if (timeout_ms_d < 100.0) {
+				timeout_ms_d = 100.0;
+			} else if (timeout_ms_d > 120000.0) {
+				timeout_ms_d = 120000.0;
+			}
+			opts->timeout_ms = (uint32_t)timeout_ms_d;
+		}
+	}
+
+	tmp = php_stream_context_get_option(context, "http", "user_agent");
+	if (tmp != NULL) {
+		size_t user_agent_len = 0;
+		if (!rp2350_strdup_from_zval(tmp, &opts->user_agent, &user_agent_len)) {
+			php_stream_wrapper_log_error(wrapper, options, "context parse failed: user_agent");
+			return false;
+		}
+	}
+
+	tmp = php_stream_context_get_option(context, "http", "content");
+	if (tmp != NULL) {
+		if (!rp2350_strdup_from_zval(tmp, &opts->content, &opts->content_len)) {
+			php_stream_wrapper_log_error(wrapper, options, "context parse failed: content");
+			return false;
+		}
+	}
+
+	tmp = php_stream_context_get_option(context, "http", "header");
+	if (tmp != NULL) {
+		if (Z_TYPE_P(tmp) == IS_ARRAY) {
+			zval *entry;
+			smart_str hdr = {0};
+			ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(tmp), entry) {
+				zend_string *line = zval_get_string(entry);
+				if (!line) {
+					smart_str_free(&hdr);
+					php_stream_wrapper_log_error(wrapper, options, "context parse failed: header array");
+					return false;
+				}
+				smart_str_appendl(&hdr, ZSTR_VAL(line), ZSTR_LEN(line));
+				smart_str_appendl(&hdr, "\r\n", 2);
+				zend_string_release(line);
+			} ZEND_HASH_FOREACH_END();
+			if (hdr.s) {
+				smart_str_0(&hdr);
+				opts->headers_len = ZSTR_LEN(hdr.s);
+				opts->headers = (char *)malloc(opts->headers_len + 1);
+				if (!opts->headers) {
+					smart_str_free(&hdr);
+					php_stream_wrapper_log_error(wrapper, options, "context alloc failed: headers");
+					return false;
+				}
+				memcpy(opts->headers, ZSTR_VAL(hdr.s), opts->headers_len + 1);
+				smart_str_free(&hdr);
+			}
+		} else {
+			if (!rp2350_strdup_from_zval(tmp, &opts->headers, &opts->headers_len)) {
+				php_stream_wrapper_log_error(wrapper, options, "context parse failed: header");
+				return false;
+			}
+		}
+	}
+
+	return true;
+}
+
+static bool rp2350_header_name_eq_ci(const char *name, size_t len, const char *lit)
+{
+	size_t i;
+	size_t lit_len = strlen(lit);
+	if (len != lit_len) {
+		return false;
+	}
+	for (i = 0; i < len; i++) {
+		if ((char)tolower((unsigned char)name[i]) != lit[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool rp2350_h2_header_forbidden(const char *name, size_t len)
+{
+	return rp2350_header_name_eq_ci(name, len, "connection")
+		|| rp2350_header_name_eq_ci(name, len, "proxy-connection")
+		|| rp2350_header_name_eq_ci(name, len, "keep-alive")
+		|| rp2350_header_name_eq_ci(name, len, "transfer-encoding")
+		|| rp2350_header_name_eq_ci(name, len, "upgrade")
+		|| rp2350_header_name_eq_ci(name, len, "host")
+		|| rp2350_header_name_eq_ci(name, len, "content-length");
+}
+
+static size_t rp2350_h2_append_context_headers(char *headers, nghttp2_nv *nva, size_t nvlen, size_t nvcap)
+{
+	char *p = headers;
+	while (p && *p) {
+		char *line_end = strchr(p, '\n');
+		char *line = p;
+		char *colon;
+		char *name_start;
+		char *name_end;
+		char *value_start;
+		char *value_end;
+		size_t name_len;
+		size_t value_len;
+		size_t i;
+
+		if (line_end) {
+			*line_end = '\0';
+			p = line_end + 1;
+		} else {
+			p = NULL;
+		}
+
+		while (*line == ' ' || *line == '\t' || *line == '\r') {
+			line++;
+		}
+		if (*line == '\0') {
+			continue;
+		}
+
+		colon = strchr(line, ':');
+		if (!colon) {
+			continue;
+		}
+		*colon = '\0';
+		name_start = line;
+		name_end = colon - 1;
+		while (name_end >= name_start && (*name_end == ' ' || *name_end == '\t')) {
+			*name_end-- = '\0';
+		}
+		if (name_end < name_start) {
+			continue;
+		}
+		value_start = colon + 1;
+		while (*value_start == ' ' || *value_start == '\t') {
+			value_start++;
+		}
+		value_end = value_start + strlen(value_start);
+		while (value_end > value_start && (value_end[-1] == '\r' || value_end[-1] == ' ' || value_end[-1] == '\t')) {
+			value_end--;
+		}
+		*value_end = '\0';
+
+		name_len = strlen(name_start);
+		value_len = (size_t)(value_end - value_start);
+		if (name_len == 0 || value_len == 0) {
+			continue;
+		}
+		if (rp2350_h2_header_forbidden(name_start, name_len)) {
+			continue;
+		}
+
+		for (i = 0; i < name_len; i++) {
+			name_start[i] = (char)tolower((unsigned char)name_start[i]);
+		}
+
+		if (nvlen >= nvcap) {
+			break;
+		}
+		nva[nvlen].name = (uint8_t *)name_start;
+		nva[nvlen].value = (uint8_t *)value_start;
+		nva[nvlen].namelen = name_len;
+		nva[nvlen].valuelen = value_len;
+		nva[nvlen].flags = NGHTTP2_NV_FLAG_NONE;
+		nvlen++;
+	}
+	return nvlen;
+}
+
+static bool rp2350_http_build_request(
+	const char *host,
+	const char *path,
+	const rp2350_http_request_opts_t *opts,
+	char **req_out,
+	size_t *req_len_out
+)
+{
+	zend_string *zs;
+	smart_str req = {0};
+	char cl_buf[48];
+	int cl_n;
+	const char *user_agent = (opts && opts->user_agent && opts->user_agent[0] != '\0')
+		? opts->user_agent
+		: "rp2350-php";
+	const char *method = (opts && opts->method[0] != '\0') ? opts->method : "GET";
+
+	if (!host || !path || !req_out || !req_len_out) {
+		return false;
+	}
+
+	smart_str_appends(&req, method);
+	smart_str_appends(&req, " ");
+	smart_str_appends(&req, path);
+	smart_str_appends(&req, " HTTP/1.1\r\nHost: ");
+	smart_str_appends(&req, host);
+	smart_str_appends(&req, "\r\nConnection: close\r\nUser-Agent: ");
+	smart_str_appends(&req, user_agent);
+	smart_str_appends(&req, "\r\nAccept: */*\r\n");
+
+	if (opts && opts->content_len > 0) {
+		cl_n = snprintf(cl_buf, sizeof(cl_buf), "Content-Length: %u\r\n", (unsigned)opts->content_len);
+		if (cl_n <= 0 || cl_n >= (int)sizeof(cl_buf)) {
+			smart_str_free(&req);
+			return false;
+		}
+		smart_str_appendl(&req, cl_buf, (size_t)cl_n);
+	}
+
+	if (opts && opts->headers && opts->headers_len > 0) {
+		smart_str_appendl(&req, opts->headers, opts->headers_len);
+		if (opts->headers[opts->headers_len - 1] != '\n') {
+			smart_str_appendl(&req, "\r\n", 2);
+		}
+	}
+
+	smart_str_appendl(&req, "\r\n", 2);
+	if (opts && opts->content && opts->content_len > 0) {
+		smart_str_appendl(&req, opts->content, opts->content_len);
+	}
+
+	smart_str_0(&req);
+	zs = smart_str_extract(&req);
+	if (!zs) {
+		return false;
+	}
+	*req_len_out = ZSTR_LEN(zs);
+	*req_out = (char *)malloc(*req_len_out + 1);
+	if (!*req_out) {
+		zend_string_release(zs);
+		return false;
+	}
+	memcpy(*req_out, ZSTR_VAL(zs), *req_len_out + 1);
+	zend_string_release(zs);
 	return true;
 }
 
@@ -1398,6 +1737,7 @@ bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t max_read,
 	u16_t port;
 	const char *path;
 	bool is_https = false;
+	rp2350_http_request_opts_t req_opts;
 	char *request = NULL;
 	size_t request_len = 0;
 	char *response = NULL;
@@ -1411,6 +1751,7 @@ bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t max_read,
 		php_error_docref(NULL, E_WARNING, "http url parse failed: %s", url ? url : "<null>");
 		return false;
 	}
+	rp2350_http_request_opts_init(&req_opts);
 
 	if (is_https) {
 		if (rp2350_h2_get_body_ex(url, timeout_ms, max_read, body_out, body_len_out, &h2_alpn_http1)) {
@@ -1421,7 +1762,7 @@ bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t max_read,
 		}
 	}
 
-	if (!rp2350_http_build_get_request(host, path, &request, &request_len)) {
+	if (!rp2350_http_build_request(host, path, &req_opts, &request, &request_len)) {
 		php_error_docref(NULL, E_WARNING, "http request build failed");
 		return false;
 	}
@@ -1525,7 +1866,15 @@ static ssize_t rp2350_http_stream_read(php_stream *stream, char *buf, size_t cou
 				stream->eof = 1;
 				return 0;
 			}
-			if (had_error || done) {
+			/* Parsed frames may have produced body bytes even if FIN is also seen. */
+			if (st->h2.body_len > 0) {
+				continue;
+			}
+			if (had_error) {
+				stream->eof = 1;
+				return 0;
+			}
+			if (done && st->net.rx_len == 0) {
 				stream->eof = 1;
 				return 0;
 			}
@@ -1658,6 +2007,8 @@ static int rp2350_http_stream_close(php_stream *stream, int close_handle)
 	st->h2.tx = NULL;
 	free(st->h2.body);
 	st->h2.body = NULL;
+	free(st->h2.req_body);
+	st->h2.req_body = NULL;
 	efree(st);
 	stream->abstract = NULL;
 	return 0;
@@ -1712,54 +2063,59 @@ static php_stream *rp2350_http_stream_opener(
 	const char *alpn = NULL;
 	int connect_attempt = 0;
 	int connect_attempts = 1;
+	rp2350_http_request_opts_t req_opts;
 
-	(void)context;
+	rp2350_http_request_opts_init(&req_opts);
+#define RP2350_HTTP_OPEN_FAIL() do { rp2350_http_request_opts_cleanup(&req_opts); return NULL; } while (0)
 
 	if (!filename || (strncmp(filename, "http://", 7) != 0 && strncmp(filename, "https://", 8) != 0)) {
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 	if (!mode || mode[0] != 'r' || mode[1] == '+') {
 		if (options & REPORT_ERRORS) {
 			php_error_docref(NULL, E_WARNING, "rp2350 http wrapper is read-only");
 		}
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 
 	if (!rp2350_parse_http_url(filename, host, sizeof(host), &port, &path, &is_https)) {
 		php_stream_wrapper_log_error(wrapper, options, "url parse failed: %s", filename ? filename : "<null>");
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
+	}
+	if (!rp2350_parse_http_context(context, &req_opts, wrapper, options)) {
+		RP2350_HTTP_OPEN_FAIL();
 	}
 
 	if (!rp2350_wifi_init_once()) {
 		php_stream_wrapper_log_error(wrapper, options, "wifi init failed");
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
 		php_stream_wrapper_log_error(wrapper, options, "wifi not connected");
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
-	if (!rp2350_dns_resolve(host, 8000, &remote)) {
+	if (!rp2350_dns_resolve(host, req_opts.timeout_ms, &remote)) {
 		php_stream_wrapper_log_error(wrapper, options, "dns resolve failed: %s", host);
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 
 	if (is_https && !rp2350_h2_tls_config_ready()) {
 		php_stream_wrapper_log_error(wrapper, options, "https tls config not ready");
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 
 	st = (rp2350_http_stream_data_t *)ecalloc(1, sizeof(*st));
 	if (!st) {
 		php_stream_wrapper_log_error(wrapper, options, "state alloc failed");
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
-	st->timeout_ms = 8000;
+	st->timeout_ms = req_opts.timeout_ms;
 	st->net.rx_cap = 32768;
 	st->net.rx = (char *)malloc(st->net.rx_cap + 1);
 	if (!st->net.rx) {
 		php_stream_wrapper_log_error(wrapper, options, "rx alloc failed");
 		efree(st);
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 	st->net.last_rx_time = get_absolute_time();
 	st->mode = RP2350_HTTP_STREAM_MODE_H1;
@@ -1862,7 +2218,7 @@ static php_stream *rp2350_http_stream_opener(
 		rp2350_h2_altcp_close(&st->net);
 		free(st->net.rx);
 		efree(st);
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 
 	if (is_https) {
@@ -1885,9 +2241,12 @@ static php_stream *rp2350_http_stream_opener(
 			tls_cipher ? tls_cipher : "<null>",
 			alpn ? alpn : "<null>"
 		);
-		if (alpn != NULL && strcmp(alpn, "h2") == 0) {
-			nghttp2_nv nva[5];
-			int rc;
+			if (alpn != NULL && strcmp(alpn, "h2") == 0) {
+				nghttp2_nv nva[64];
+				size_t nvlen = 0;
+				nghttp2_data_provider data_provider;
+				nghttp2_data_provider *provider_ptr = NULL;
+				int rc;
 
 			st->mode = RP2350_HTTP_STREAM_MODE_H2;
 			st->h2.body_dynamic = true;
@@ -1901,7 +2260,7 @@ static php_stream *rp2350_http_stream_opener(
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				efree(st);
-				return NULL;
+				RP2350_HTTP_OPEN_FAIL();
 			}
 			nghttp2_session_callbacks_set_send_callback(st->h2_callbacks, rp2350_h2_send_cb);
 			nghttp2_session_callbacks_set_on_header_callback(st->h2_callbacks, rp2350_h2_on_header_cb);
@@ -1917,7 +2276,7 @@ static php_stream *rp2350_http_stream_opener(
 				free(st->net.rx);
 				nghttp2_session_callbacks_del(st->h2_callbacks);
 				efree(st);
-				return NULL;
+				RP2350_HTTP_OPEN_FAIL();
 			}
 
 			rc = nghttp2_submit_settings(st->h2_session, NGHTTP2_FLAG_NONE, NULL, 0);
@@ -1930,32 +2289,67 @@ static php_stream *rp2350_http_stream_opener(
 				nghttp2_session_del(st->h2_session);
 				nghttp2_session_callbacks_del(st->h2_callbacks);
 				efree(st);
-				return NULL;
+				RP2350_HTTP_OPEN_FAIL();
 			}
 
 			memset(nva, 0, sizeof(nva));
-			nva[0].name = (uint8_t *)":method";
-			nva[0].value = (uint8_t *)"GET";
-			nva[0].namelen = sizeof(":method") - 1;
-			nva[0].valuelen = sizeof("GET") - 1;
-			nva[1].name = (uint8_t *)":scheme";
-			nva[1].value = (uint8_t *)"https";
-			nva[1].namelen = sizeof(":scheme") - 1;
-			nva[1].valuelen = sizeof("https") - 1;
-			nva[2].name = (uint8_t *)":authority";
-			nva[2].value = (uint8_t *)host;
-			nva[2].namelen = sizeof(":authority") - 1;
-			nva[2].valuelen = strlen(host);
-			nva[3].name = (uint8_t *)":path";
-			nva[3].value = (uint8_t *)path;
-			nva[3].namelen = sizeof(":path") - 1;
-			nva[3].valuelen = strlen(path);
-			nva[4].name = (uint8_t *)"user-agent";
-			nva[4].value = (uint8_t *)"rp2350-php";
-			nva[4].namelen = sizeof("user-agent") - 1;
-			nva[4].valuelen = sizeof("rp2350-php") - 1;
+			nva[nvlen].name = (uint8_t *)":method";
+			nva[nvlen].value = (uint8_t *)req_opts.method;
+			nva[nvlen].namelen = sizeof(":method") - 1;
+			nva[nvlen].valuelen = strlen(req_opts.method);
+			nvlen++;
 
-			st->h2.stream_id = nghttp2_submit_request(st->h2_session, NULL, nva, 5, NULL, NULL);
+			nva[nvlen].name = (uint8_t *)":scheme";
+			nva[nvlen].value = (uint8_t *)"https";
+			nva[nvlen].namelen = sizeof(":scheme") - 1;
+			nva[nvlen].valuelen = sizeof("https") - 1;
+			nvlen++;
+
+			nva[nvlen].name = (uint8_t *)":authority";
+			nva[nvlen].value = (uint8_t *)host;
+			nva[nvlen].namelen = sizeof(":authority") - 1;
+			nva[nvlen].valuelen = strlen(host);
+			nvlen++;
+
+			nva[nvlen].name = (uint8_t *)":path";
+			nva[nvlen].value = (uint8_t *)path;
+			nva[nvlen].namelen = sizeof(":path") - 1;
+			nva[nvlen].valuelen = strlen(path);
+			nvlen++;
+
+			nva[nvlen].name = (uint8_t *)"user-agent";
+			nva[nvlen].value = (uint8_t *)((req_opts.user_agent && req_opts.user_agent[0] != '\0') ? req_opts.user_agent : "rp2350-php");
+			nva[nvlen].namelen = sizeof("user-agent") - 1;
+			nva[nvlen].valuelen = strlen((char *)nva[nvlen].value);
+			nvlen++;
+
+			if (req_opts.headers && req_opts.headers_len > 0) {
+				nvlen = rp2350_h2_append_context_headers(req_opts.headers, nva, nvlen, sizeof(nva) / sizeof(nva[0]));
+			}
+
+			memset(&data_provider, 0, sizeof(data_provider));
+			if (req_opts.content && req_opts.content_len > 0) {
+				st->h2.req_body = (char *)malloc(req_opts.content_len);
+				if (!st->h2.req_body) {
+					if (options & REPORT_ERRORS) {
+						php_error_docref(NULL, E_WARNING, "https wrapper: h2 request body alloc failed");
+					}
+					rp2350_h2_altcp_close(&st->net);
+					free(st->net.rx);
+					nghttp2_session_del(st->h2_session);
+					nghttp2_session_callbacks_del(st->h2_callbacks);
+					efree(st);
+					RP2350_HTTP_OPEN_FAIL();
+				}
+				memcpy(st->h2.req_body, req_opts.content, req_opts.content_len);
+				st->h2.req_body_len = req_opts.content_len;
+				st->h2.req_body_off = 0;
+				data_provider.source.ptr = &st->h2;
+				data_provider.read_callback = rp2350_h2_read_data_cb;
+				provider_ptr = &data_provider;
+			}
+
+			st->h2.stream_id = nghttp2_submit_request(st->h2_session, NULL, nva, nvlen, provider_ptr, NULL);
 			if (st->h2.stream_id < 0) {
 				if (options & REPORT_ERRORS) {
 					php_error_docref(NULL, E_WARNING, "https wrapper: h2 submit request failed: %d", (int)st->h2.stream_id);
@@ -1965,7 +2359,7 @@ static php_stream *rp2350_http_stream_opener(
 				nghttp2_session_del(st->h2_session);
 				nghttp2_session_callbacks_del(st->h2_callbacks);
 				efree(st);
-				return NULL;
+				RP2350_HTTP_OPEN_FAIL();
 			}
 
 			rc = nghttp2_session_send(st->h2_session);
@@ -1978,7 +2372,7 @@ static php_stream *rp2350_http_stream_opener(
 				nghttp2_session_del(st->h2_session);
 				nghttp2_session_callbacks_del(st->h2_callbacks);
 				efree(st);
-				return NULL;
+				RP2350_HTTP_OPEN_FAIL();
 			}
 		}
 	}
@@ -1988,13 +2382,13 @@ static php_stream *rp2350_http_stream_opener(
 		size_t request_len = 0;
 		size_t off = 0;
 
-			if (!rp2350_http_build_get_request(host, path, &request, &request_len)) {
+			if (!rp2350_http_build_request(host, path, &req_opts, &request, &request_len)) {
 				php_stream_wrapper_log_error(wrapper, options, "request build failed");
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				efree(st);
-			return NULL;
-		}
+				RP2350_HTTP_OPEN_FAIL();
+			}
 
 		while (off < request_len) {
 			bool wrote = false;
@@ -2021,7 +2415,7 @@ static php_stream *rp2350_http_stream_opener(
 				free(st->net.rx);
 				free(request);
 				efree(st);
-				return NULL;
+				RP2350_HTTP_OPEN_FAIL();
 			}
 			if (!wrote) {
 				if (time_reached(deadline)) {
@@ -2030,7 +2424,7 @@ static php_stream *rp2350_http_stream_opener(
 					free(st->net.rx);
 					free(request);
 					efree(st);
-					return NULL;
+					RP2350_HTTP_OPEN_FAIL();
 				}
 				sleep_ms(1);
 			}
@@ -2050,13 +2444,15 @@ static php_stream *rp2350_http_stream_opener(
 		rp2350_h2_altcp_close(&st->net);
 		free(st->net.rx);
 		efree(st);
-		return NULL;
+		RP2350_HTTP_OPEN_FAIL();
 	}
 	stream->wrapper = wrapper;
 
 	if (opened_path) {
 		*opened_path = zend_string_init(filename, strlen(filename), 0);
 	}
+	rp2350_http_request_opts_cleanup(&req_opts);
+#undef RP2350_HTTP_OPEN_FAIL
 	return stream;
 }
 

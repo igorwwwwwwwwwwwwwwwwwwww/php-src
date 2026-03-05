@@ -113,6 +113,24 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
             print "\n";
         }
 
+        $ctx = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'timeout' => 6.0,
+                'header' => "X-RP2350-Context: 1\r\n",
+            ],
+        ]);
+        $https_ctx = file_get_contents('https://example.com/', false, $ctx);
+        if ($https_ctx === false) {
+            print "https:ctx:fail\n";
+        } else {
+            print "https:ctx:ok len:";
+            print strlen($https_ctx);
+            print " head:";
+            print substr($https_ctx, 0, 24);
+            print "\n";
+        }
+
     }
 }
 
