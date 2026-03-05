@@ -127,7 +127,6 @@ Exposed PHP APIs:
 - `mcu_wifi_status(): int`
 - `mcu_wifi_ip(): string|false`
 - `mcu_ntp_sync(?string $server = "pool.ntp.org", int $timeout_ms = 15000): bool`
-- `mcu_tcp_request(string $host, int $port, string $payload, int $timeout_ms = 5000, int $max_read = 4096): string|false`
 
 Wi-Fi status constants:
 - `MCU_WIFI_LINK_DOWN`

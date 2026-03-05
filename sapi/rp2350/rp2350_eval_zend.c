@@ -202,7 +202,6 @@ ZEND_FUNCTION(mcu_wifi_disconnect);
 ZEND_FUNCTION(mcu_wifi_status);
 ZEND_FUNCTION(mcu_wifi_ip);
 ZEND_FUNCTION(mcu_ntp_sync);
-ZEND_FUNCTION(mcu_tcp_request);
 ZEND_FUNCTION(mcu_set_time);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
@@ -290,14 +289,6 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_ntp_sync, 0, 0, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_tcp_request, 0, 3, MAY_BE_STRING | MAY_BE_FALSE)
-	ZEND_ARG_TYPE_INFO(0, host, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, port, IS_LONG, 0)
-	ZEND_ARG_TYPE_INFO(0, payload, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
-	ZEND_ARG_TYPE_INFO(0, max_read, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_set_time, 0, 1, _IS_BOOL, 0)
 	ZEND_ARG_TYPE_INFO(0, unix_time, IS_LONG, 0)
 ZEND_END_ARG_INFO()
@@ -324,7 +315,6 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
 	ZEND_FE(mcu_wifi_ip, arginfo_mcu_wifi_ip)
 	ZEND_FE(mcu_ntp_sync, arginfo_mcu_ntp_sync)
-	ZEND_FE(mcu_tcp_request, arginfo_mcu_tcp_request)
 	ZEND_FE(mcu_set_time, arginfo_mcu_set_time)
 	ZEND_FE_END
 };
@@ -964,60 +954,6 @@ ZEND_FUNCTION(mcu_ntp_sync)
 	memcpy(s_sntp_server, server, server_len);
 	s_sntp_server[server_len] = '\0';
 	RETURN_BOOL(rp2350_sntp_sync_once(s_sntp_server, (uint32_t)timeout_ms));
-}
-
-ZEND_FUNCTION(mcu_tcp_request)
-{
-	char *host = NULL;
-	size_t host_len = 0;
-	zend_long port = 0;
-	char *payload = NULL;
-	size_t payload_len = 0;
-	zend_long timeout_ms = 5000;
-	zend_long max_read = 4096;
-	char *resp = NULL;
-	size_t resp_len = 0;
-
-	ZEND_PARSE_PARAMETERS_START(3, 5)
-		Z_PARAM_STRING(host, host_len)
-		Z_PARAM_LONG(port)
-		Z_PARAM_STRING(payload, payload_len)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_LONG(timeout_ms)
-		Z_PARAM_LONG(max_read)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (host_len == 0) {
-		zend_argument_value_error(1, "must not be empty");
-		RETURN_THROWS();
-	}
-	if (port <= 0 || port > 65535) {
-		zend_argument_value_error(2, "must be between 1 and 65535");
-		RETURN_THROWS();
-	}
-	if (timeout_ms < 100) {
-		timeout_ms = 100;
-	}
-	if (max_read < 1) {
-		max_read = 1;
-	} else if (max_read > 262144) {
-		max_read = 262144;
-	}
-
-	if (!rp2350_net_tcp_request(
-		host,
-		(u16_t)port,
-		payload,
-		payload_len,
-		(uint32_t)timeout_ms,
-		(size_t)max_read,
-		&resp,
-		&resp_len
-	)) {
-		RETURN_FALSE;
-	}
-	RETVAL_STRINGL(resp, resp_len);
-	free(resp);
 }
 
 ZEND_FUNCTION(mcu_set_time)

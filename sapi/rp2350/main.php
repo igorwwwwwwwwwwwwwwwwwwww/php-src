@@ -91,18 +91,6 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
         print time();
         print "\n";
 
-        $req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
-        $resp = mcu_tcp_request('example.com', 80, $req, 6000, 512);
-        if ($resp === false) {
-            print "tcp:req:fail\n";
-        } else {
-            print "tcp:req:ok len:";
-            print strlen($resp);
-            print " head:";
-            print str_replace("\r", "", substr($resp, 0, 32));
-            print "\n";
-        }
-
         $http = file_get_contents('http://example.com/');
         if ($http === false) {
             print "http:wrapper:fail\n";
