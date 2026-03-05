@@ -240,6 +240,18 @@ Allocator notes:
   - Keep current behavior only as bring-up fallback/debug mode.
 - Entropy hardening:
   - Add optional entropy seeding/mixing from external I2C sensor noise as an additional source (defense-in-depth on top of hardware RNG).
+- Explore JIT feasibility:
+  - Investigate whether any constrained/partial opcache+JIT mode is viable on RP2350 (likely off by default, experimental only).
+  - Document hard blockers (memory model, executable memory constraints, code cache placement, toolchain requirements).
+- Split large sources:
+  - Break up oversized RP2350 integration files (especially `rp2350_eval_zend.c`) into focused units (networking, builtins, stream wrappers, runtime bootstrap).
+  - Keep interfaces small and testable to reduce bring-up/debug friction.
+- Firmware-visible error signaling:
+  - Blink a dedicated LED pattern on PHP warning/error/fatal paths so failures are visible without UART attached.
+  - Define stable severity-to-pattern mapping (warning vs fatal) and avoid blocking critical loops.
+- HTTP/1 parser foundation:
+  - Evaluate integrating `picohttpparser` for lightweight custom HTTP/1.1 parsing in RP2350 transport/wrapper paths.
+  - Keep role split clear: lwIP/httpc or picohttpparser for H1, nghttp2 for H2.
 
 ## Important constraints
 
