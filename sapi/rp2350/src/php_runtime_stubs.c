@@ -15,6 +15,7 @@
 #include "ext/random/php_random.h"
 #include "ext/random/php_random_csprng.h"
 #include "ext/random/php_random_zend_utils.h"
+#include "ext/pcre/php_pcre.h"
 #include "ext/lexbor/php_lexbor.h"
 #include "ext/uri/php_uri.h"
 #include "ext/date/php_date.h"
@@ -185,6 +186,7 @@ PHPAPI int php_register_internal_extensions(void)
 #if defined(RP2350_FULL_STANDARD) && RP2350_FULL_STANDARD
 	static zend_module_entry * const rp2350_builtin_extensions[] = {
 		phpext_random_ptr,
+		phpext_pcre_ptr,
 		phpext_lexbor_ptr,
 		phpext_uri_ptr,
 		phpext_date_ptr,

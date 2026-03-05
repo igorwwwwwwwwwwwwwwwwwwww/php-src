@@ -11,6 +11,7 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 - POSIX shims stub out unsupported host APIs
 - MCU builtins include button/LED helpers and EPD drawing helpers
 - MCU builtins now include Wi-Fi helpers (init/connect/disconnect/status/IP)
+- PCRE extension (`preg_*`) is included (bundled PCRE2, JIT disabled on target)
 - Zend observer runtime is disabled during bring-up to reduce crash surface
 - Embedded fake filesystem is enabled for script loading (`/main.php`, `/lib.php`, etc)
 - Board I/O via overridable weak symbols:
@@ -266,8 +267,6 @@ Allocator notes:
 - Add mDNS support:
   - Evaluate lwIP mDNS responder/client integration for device discovery on local networks.
   - Define minimal RP2350 surface (hostname announce + lookup) and a basic smoke test (`*.local` resolution).
-- PCRE/profile decision:
-  - Decide whether to include PCRE (`preg_*`) in the RP2350 profile or keep it omitted and document the reduced core function set clearly.
 - Explore JIT feasibility:
   - Investigate whether any constrained/partial opcache+JIT mode is viable on RP2350 (likely off by default, experimental only).
   - Document hard blockers (memory model, executable memory constraints, code cache placement, toolchain requirements).

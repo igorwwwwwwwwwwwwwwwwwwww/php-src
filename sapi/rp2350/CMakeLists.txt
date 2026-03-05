@@ -122,6 +122,40 @@ set(RP2350_DATE_SOURCES
   ${PHP_SRC_ROOT}/ext/date/lib/parse_iso_intervals.c
   ${PHP_SRC_ROOT}/ext/date/lib/interval.c
 )
+set(RP2350_PCRE_SOURCES
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_auto_possess.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_chartables.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_chkdint.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_compile.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_config.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_context.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_convert.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_dfa_match.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_error.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_extuni.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_find_bracket.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_maketables.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_match_data.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_match.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_newline.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_ord2utf.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_pattern_info.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_script_run.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_serialize.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_string_utils.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_study.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_substitute.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_substring.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_tables.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_ucd.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_valid_utf.c
+  ${PHP_SRC_ROOT}/ext/pcre/pcre2lib/pcre2_xclass.c
+  ${PHP_SRC_ROOT}/ext/pcre/php_pcre.c
+)
+set_source_files_properties(${RP2350_PCRE_SOURCES} PROPERTIES
+  COMPILE_DEFINITIONS "HAVE_CONFIG_H;HAVE_BUNDLED_PCRE=1;PCRE2_STATIC=1;PCRE2_CODE_UNIT_WIDTH=8"
+  COMPILE_OPTIONS "-Wno-error=incompatible-pointer-types"
+)
 set(RP2350_LEXBOR_SOURCES
   ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/array_obj.c
   ${PHP_SRC_ROOT}/ext/lexbor/lexbor/core/array.c
@@ -237,6 +271,7 @@ add_executable(php_mcu_firmware
   ${RP2350_STANDARD_SOURCES}
   ${PHP_SRC_ROOT}/ext/standard/libavifinfo/avifinfo.c
   ${RP2350_RANDOM_SOURCES}
+  ${RP2350_PCRE_SOURCES}
   ${RP2350_URI_SOURCES}
   ${RP2350_URIPARSER_SOURCES}
   ${RP2350_DATE_SOURCES}
@@ -278,6 +313,8 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   _POSIX_MONOTONIC_CLOCK=1
   HAVE_TIMELIB_CONFIG_H=1
   HAVE_LEXBOR=1
+  HAVE_BUNDLED_PCRE=1
+  PCRE2_CODE_UNIT_WIDTH=8
   LEXBOR_VERSION=\"2.5.0\"
   URI_ENABLE_ANSI=1
   URI_NO_UNICODE=1

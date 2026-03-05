@@ -2,6 +2,16 @@
 require '/lib.php';
 require '/logo.php';
 
+function run_pcre_smoke() {
+    $m = preg_match('/RP2350/', 'PHP RP2350');
+    $r = preg_replace('/\s+/', '-', 'a b c');
+    if ($m === 1 && $r === 'a-b-c') {
+        print "pcre:ok\n";
+    } else {
+        print "pcre:fail\n";
+    }
+}
+
 function wifi_status_label($status) {
     if ($status === MCU_WIFI_LINK_UP) {
         return 'UP';
@@ -91,6 +101,8 @@ $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
 $wifi_status = MCU_WIFI_LINK_DOWN;
 $wifi_ip4 = null;
 $wifi_ip6 = null;
+
+run_pcre_smoke();
 
 $wifi_ssid = getenv('WIFI_SSID');
 $wifi_pass = getenv('WIFI_PASS');
