@@ -182,6 +182,9 @@ set(RP2350_NGHTTP2_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/nghttp2_debug.c
   ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/sfparse.c
 )
+set(RP2350_PICOHTTPPARSER_SOURCES
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/picohttpparser/picohttpparser.c
+)
 
 add_executable(php_mcu_firmware
   src/main.c
@@ -211,7 +214,6 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/main/SAPI.c
   ${PHP_SRC_ROOT}/main/main.c
   src/rp2350_network_stubs.c
-  ${PICO_SDK_PATH}/lib/lwip/src/apps/http/http_client.c
   ${PHP_SRC_ROOT}/main/getopt.c
   ${PHP_SRC_ROOT}/main/explicit_bzero.c
   ${PHP_SRC_ROOT}/main/safe_bcmp.c
@@ -235,6 +237,7 @@ add_executable(php_mcu_firmware
   ${PHP_SRC_ROOT}/ext/lexbor/php_lexbor.c
   ${RP2350_LEXBOR_SOURCES}
   ${RP2350_NGHTTP2_SOURCES}
+  ${RP2350_PICOHTTPPARSER_SOURCES}
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
 )
@@ -248,6 +251,7 @@ target_include_directories(php_mcu_firmware PRIVATE
   ${PICO_SDK_PATH}/lib/mbedtls/include/mbedtls
   ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/includes
   ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/picohttpparser
   ${PHP_SRC_ROOT}
   ${PHP_SRC_ROOT}/main
   ${PHP_SRC_ROOT}/TSRM
