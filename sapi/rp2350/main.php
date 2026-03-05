@@ -38,32 +38,36 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
     }
 
     $buf = mcu_fb_create(MCU_EPD_WIDTH, MCU_EPD_HEIGHT, false);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 18, 18, 'PHP RP2350', 3, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 56, 'BUTTONS -> LEDS', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 80, 'BAT', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 80, (string)$batt_pct, 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 118, 80, $usb_connected ? 'USB' : 'BAT', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 168, 80, $charging ? 'CHG' : 'IDLE', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 96, 'WIFI', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 96, wifi_status_label($wifi_status), 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 112, 'V4', 1, 1);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 16, 'PHP RP2350', 3, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 54, 'BUTTONS -> LEDS', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 78, 'BAT', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 70, 78, (string)$batt_pct, 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 114, 78, $usb_connected ? 'USB' : 'BAT', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 164, 78, $charging ? 'CHG' : 'IDLE', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 100, 'WIFI', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 70, 100, wifi_status_label($wifi_status), 2, 2);
+
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 136, 'UPDATED', 1, 1);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 56, 136, date('Y-m-d\\TH:i:s'), 1, 1);
+
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 152, 'V4', 1, 1);
     mcu_draw_text(
         $buf,
         MCU_EPD_WIDTH,
         MCU_EPD_HEIGHT,
-        44,
-        112,
+        28,
+        152,
         (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-',
         1,
         1
     );
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 122, 'V6', 1, 1);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 164, 'V6', 1, 1);
     mcu_draw_text(
         $buf,
         MCU_EPD_WIDTH,
         MCU_EPD_HEIGHT,
-        44,
-        122,
+        28,
+        164,
         (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-',
         1,
         1

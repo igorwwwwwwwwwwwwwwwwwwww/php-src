@@ -270,6 +270,8 @@ Allocator notes:
 - Split large sources:
   - Break up oversized RP2350 integration files (especially `rp2350_eval_zend.c`) into focused units (networking, builtins, stream wrappers, runtime bootstrap).
   - Keep interfaces small and testable to reduce bring-up/debug friction.
+- EPD geometry constants:
+  - Consider exposing panel dimensions as engine constants (for example `MCU_EPD_WIDTH` / `MCU_EPD_HEIGHT`) from C so PHP-side framebuffer/layout code cannot drift from firmware geometry.
 - Revisit directory/layout consistency:
   - Normalize placement of RP2350 sources/headers (root vs `src/` vs `include/`) to one clear convention.
   - Document the convention and move files incrementally to avoid churn.

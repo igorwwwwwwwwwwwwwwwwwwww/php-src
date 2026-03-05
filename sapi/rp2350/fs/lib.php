@@ -1,7 +1,7 @@
 <?php
 
-const MCU_EPD_WIDTH = 296;
-const MCU_EPD_HEIGHT = 128;
+const MCU_EPD_WIDTH = 264;
+const MCU_EPD_HEIGHT = 176;
 const MCU_BAT_MAX_V = 4.10;
 
 const MCU_FONT_5X7 = array(
