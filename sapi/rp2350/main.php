@@ -118,27 +118,6 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
             print "\n";
         }
 
-        $h2 = mcu_h2_get('https://nghttp2.org/httpbin/get', 10000, 16384);
-        if ($h2 === false) {
-            print "h2:get:fail\n";
-        } else {
-            print "h2:get:ok len:";
-            print strlen($h2);
-            print " head:";
-            print substr($h2, 0, 24);
-            print "\n";
-        }
-
-        $h2_uuid = mcu_h2_get('https://nghttp2.org/httpbin/uuid', 10000, 16384);
-        if ($h2_uuid === false) {
-            print "h2:uuid:fail\n";
-        } else {
-            print "h2:uuid:ok len:";
-            print strlen($h2_uuid);
-            print " head:";
-            print substr($h2_uuid, 0, 24);
-            print "\n";
-        }
     }
 }
 

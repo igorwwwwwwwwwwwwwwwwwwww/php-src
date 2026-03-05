@@ -127,7 +127,6 @@ Exposed PHP APIs:
 - `mcu_wifi_status(): int`
 - `mcu_wifi_ip(): string|false`
 - `mcu_tcp_request(string $host, int $port, string $payload, int $timeout_ms = 5000, int $max_read = 4096): string|false`
-- `mcu_udp_sendto(string $host, int $port, string $payload, int $timeout_ms = 2000): bool`
 
 Wi-Fi status constants:
 - `MCU_WIFI_LINK_DOWN`
@@ -141,10 +140,11 @@ Wi-Fi status constants:
 Current limitation:
 - This is connection/status/IP foundation only.
 - PHP stream/socket transport is still mostly stubbed in `src/rp2350_network_stubs.c`, so `ext/curl` and generic network streams are not wired yet.
-- TCP/UDP helpers above use lwIP raw APIs directly (under `NO_SYS=1`) and are intended as a bring-up path, not a full PHP sockets layer.
-- `http://` and `https://` loading is handled by the RP2350 Zend stream-open hook using lwIP HTTP client (`apps/http/http_client.c`) with `altcp_tls` for HTTPS.
-- lwIP `http_client` in this integration path does not provide an automatic dechunk helper; `Transfer-Encoding: chunked` responses may include chunk framing unless we dechunk in RP2350 wrapper code.
-- Current HTTPS bring-up uses lwIP/mbedTLS client config without an embedded CA bundle yet (verification policy tightening is TODO).
+- `http://` and `https://` loading is handled by custom RP2350 wrappers:
+  - HTTP/1.1 parsing via `picohttpparser`
+  - HTTP/2 path via `nghttp2` when ALPN negotiates `h2`
+  - HTTPS transport via lwIP `altcp_tls`
+- Current HTTPS bring-up does not use full certificate validation yet (policy tightening is TODO).
 
 ## SWD debug (OpenOCD + GDB)
 
@@ -235,9 +235,6 @@ Allocator notes:
 - Make EPD updates non-blocking:
   - Explore async e-ink refresh pipeline to avoid blocking PHP execution during render/update.
   - If async is too invasive, evaluate running EPD work on the second RP2350 core with safe handoff/synchronization.
-- Implement HTTP body dechunking for wrapper responses:
-  - Parse and strip HTTP/1.1 chunk framing in RP2350 stream wrapper path for `http://` and `https://`.
-  - Keep current behavior only as bring-up fallback/debug mode.
 - Entropy hardening:
   - Add optional entropy seeding/mixing from external I2C sensor noise as an additional source (defense-in-depth on top of hardware RNG).
 - Explore JIT feasibility:
@@ -249,9 +246,6 @@ Allocator notes:
 - Firmware-visible error signaling:
   - Blink a dedicated LED pattern on PHP warning/error/fatal paths so failures are visible without UART attached.
   - Define stable severity-to-pattern mapping (warning vs fatal) and avoid blocking critical loops.
-- HTTP/1 parser foundation:
-  - Evaluate integrating `picohttpparser` for lightweight custom HTTP/1.1 parsing in RP2350 transport/wrapper paths.
-  - Keep role split clear: lwIP/httpc or picohttpparser for H1, nghttp2 for H2.
 
 ## Important constraints
 

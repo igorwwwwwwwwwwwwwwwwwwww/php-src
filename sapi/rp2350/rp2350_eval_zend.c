@@ -203,8 +203,6 @@ ZEND_FUNCTION(mcu_wifi_disconnect);
 ZEND_FUNCTION(mcu_wifi_status);
 ZEND_FUNCTION(mcu_wifi_ip);
 ZEND_FUNCTION(mcu_tcp_request);
-ZEND_FUNCTION(mcu_udp_sendto);
-ZEND_FUNCTION(mcu_h2_get);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
@@ -294,19 +292,6 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_tcp_request, 0, 3, MAY_BE_ST
 	ZEND_ARG_TYPE_INFO(0, max_read, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_udp_sendto, 0, 3, _IS_BOOL, 0)
-	ZEND_ARG_TYPE_INFO(0, host, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, port, IS_LONG, 0)
-	ZEND_ARG_TYPE_INFO(0, payload, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_h2_get, 0, 1, MAY_BE_STRING | MAY_BE_FALSE)
-	ZEND_ARG_TYPE_INFO(0, url, IS_STRING, 0)
-	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
-	ZEND_ARG_TYPE_INFO(0, max_read, IS_LONG, 0)
-ZEND_END_ARG_INFO()
-
 static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_button_pressed, arginfo_mcu_button_pressed)
 	ZEND_FE(mcu_button_state_mask, arginfo_mcu_button_state_mask)
@@ -329,8 +314,6 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
 	ZEND_FE(mcu_wifi_ip, arginfo_mcu_wifi_ip)
 	ZEND_FE(mcu_tcp_request, arginfo_mcu_tcp_request)
-	ZEND_FE(mcu_udp_sendto, arginfo_mcu_udp_sendto)
-	ZEND_FE(mcu_h2_get, arginfo_mcu_h2_get)
 	ZEND_FE_END
 };
 
@@ -2464,108 +2447,6 @@ ZEND_FUNCTION(mcu_tcp_request)
 	free(resp);
 }
 
-ZEND_FUNCTION(mcu_h2_get)
-{
-	char *url = NULL;
-	size_t url_len = 0;
-	zend_long timeout_ms = 8000;
-	zend_long max_read = 131072;
-	char *body = NULL;
-	size_t body_len = 0;
-
-	ZEND_PARSE_PARAMETERS_START(1, 3)
-		Z_PARAM_STRING(url, url_len)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_LONG(timeout_ms)
-		Z_PARAM_LONG(max_read)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (url_len == 0) {
-		zend_argument_value_error(1, "must not be empty");
-		RETURN_THROWS();
-	}
-	if (timeout_ms < 100) {
-		timeout_ms = 100;
-	}
-	if (max_read < 1) {
-		max_read = 1;
-	} else if (max_read > 262144) {
-		max_read = 262144;
-	}
-
-	if (!rp2350_h2_get_body(url, (uint32_t)timeout_ms, (size_t)max_read, &body, &body_len)) {
-		RETURN_FALSE;
-	}
-	RETVAL_STRINGL(body, body_len);
-	free(body);
-}
-
-ZEND_FUNCTION(mcu_udp_sendto)
-{
-	char *host = NULL;
-	size_t host_len = 0;
-	zend_long port = 0;
-	char *payload = NULL;
-	size_t payload_len = 0;
-	zend_long timeout_ms = 2000;
-	ip_addr_t remote;
-	struct udp_pcb *pcb = NULL;
-	struct pbuf *pb = NULL;
-	bool ok = false;
-
-	ZEND_PARSE_PARAMETERS_START(3, 4)
-		Z_PARAM_STRING(host, host_len)
-		Z_PARAM_LONG(port)
-		Z_PARAM_STRING(payload, payload_len)
-		Z_PARAM_OPTIONAL
-		Z_PARAM_LONG(timeout_ms)
-	ZEND_PARSE_PARAMETERS_END();
-
-	if (host_len == 0) {
-		zend_argument_value_error(1, "must not be empty");
-		RETURN_THROWS();
-	}
-	if (port <= 0 || port > 65535) {
-		zend_argument_value_error(2, "must be between 1 and 65535");
-		RETURN_THROWS();
-	}
-	if (timeout_ms < 100) {
-		timeout_ms = 100;
-	}
-	if (payload_len > 1472) {
-		zend_argument_value_error(3, "must be 1472 bytes or less");
-		RETURN_THROWS();
-	}
-
-	if (!rp2350_wifi_init_once()) {
-		RETURN_FALSE;
-	}
-	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
-		RETURN_FALSE;
-	}
-	if (!rp2350_dns_resolve(host, (uint32_t)timeout_ms, &remote)) {
-		RETURN_FALSE;
-	}
-
-	cyw43_arch_lwip_begin();
-	pcb = udp_new_ip_type(IP_GET_TYPE(&remote));
-	if (pcb != NULL) {
-		pb = pbuf_alloc(PBUF_TRANSPORT, (u16_t)payload_len, PBUF_RAM);
-		if (pb != NULL) {
-			memcpy(pb->payload, payload, payload_len);
-			ok = (udp_sendto(pcb, pb, &remote, (u16_t)port) == ERR_OK);
-		}
-	}
-	if (pb != NULL) {
-		pbuf_free(pb);
-	}
-	if (pcb != NULL) {
-		udp_remove(pcb);
-	}
-	cyw43_arch_lwip_end();
-
-	RETURN_BOOL(ok);
-}
 
 static void rp2350_zend_error_cb(int type, zend_string *error_filename, const uint32_t error_lineno, zend_string *message)
 {
