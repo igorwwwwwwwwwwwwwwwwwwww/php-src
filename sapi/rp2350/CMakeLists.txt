@@ -191,6 +191,7 @@ add_executable(php_mcu_firmware
   src/main.c
   src/fault_handlers.c
   src/rp2350_dns_stubs.c
+  src/rp2350_http_stream.c
   src/rp2350_vfs_syscalls.c
   src/rp2350_ca_bundle.c
   rp2350_rtc.c
