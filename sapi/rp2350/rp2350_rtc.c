@@ -17,6 +17,11 @@ static uint8_t bcd_to_u8(uint8_t v)
 	return (uint8_t)(((v >> 4u) * 10u) + (v & 0x0fu));
 }
 
+static uint8_t u8_to_bcd(uint8_t v)
+{
+	return (uint8_t)(((v / 10u) << 4u) | (v % 10u));
+}
+
 static int64_t days_from_civil(int year, unsigned month, unsigned day)
 {
 	year -= month <= 2;
@@ -123,4 +128,30 @@ bool rp2350_rtc_sync_system_time(void)
 	tv.tv_sec = t;
 	tv.tv_usec = 0;
 	return settimeofday(&tv, NULL) == 0;
+}
+
+bool rp2350_rtc_set_unix_time(time_t unix_time)
+{
+	struct tm utc_tm;
+	uint8_t raw[8];
+
+	if (gmtime_r(&unix_time, &utc_tm) == NULL) {
+		return false;
+	}
+	if (utc_tm.tm_year < 100 || utc_tm.tm_year > 199) {
+		return false;
+	}
+
+	rp2350_rtc_bus_init();
+
+	raw[0] = PCF85063_REG_SECONDS;
+	raw[1] = u8_to_bcd((uint8_t)utc_tm.tm_sec) & 0x7fu;
+	raw[2] = u8_to_bcd((uint8_t)utc_tm.tm_min) & 0x7fu;
+	raw[3] = u8_to_bcd((uint8_t)utc_tm.tm_hour) & 0x3fu;
+	raw[4] = u8_to_bcd((uint8_t)utc_tm.tm_mday) & 0x3fu;
+	raw[5] = u8_to_bcd((uint8_t)utc_tm.tm_wday) & 0x07u;
+	raw[6] = u8_to_bcd((uint8_t)(utc_tm.tm_mon + 1)) & 0x1fu;
+	raw[7] = u8_to_bcd((uint8_t)(utc_tm.tm_year - 100));
+
+	return i2c_write_blocking(BW_RTC_I2C, BW_RTC_ADDR, raw, sizeof(raw), false) == (int)sizeof(raw);
 }

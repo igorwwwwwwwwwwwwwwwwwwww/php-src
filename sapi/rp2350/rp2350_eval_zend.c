@@ -25,6 +25,7 @@
 #include "lwip/err.h"
 #include "lwip/altcp.h"
 #include "lwip/altcp_tls.h"
+#include "lwip/apps/sntp.h"
 #include "mbedtls/ssl.h"
 #include "nghttp2/nghttp2.h"
 #include "picohttpparser.h"
@@ -44,14 +45,17 @@
 #include "main/php_main.h"
 #include "main/php_globals.h"
 #include "main/php_memory_streams.h"
+#include "main/php_streams.h"
 #include "main/php_variables.h"
 #include "ext/standard/file.h"
 
 #include "rp2350_eval.h"
 #include "rp2350_epd.h"
 #include "rp2350_psram.h"
+#include "rp2350_rtc.h"
 #include "rp2350_transport.h"
 #include "rp2350_vfs.h"
+#include "src/rp2350_ca_bundle.h"
 
 static bool rp2350_zend_started = false;
 static bool rp2350_sapi_started = false;
@@ -66,6 +70,8 @@ static bool s_buttons_init = false;
 static bool s_leds_init = false;
 static bool s_power_sense_init = false;
 static bool s_wifi_init = false;
+static volatile bool s_sntp_sync_seen = false;
+static volatile uint32_t s_sntp_sync_count = 0;
 static struct altcp_tls_config *s_http_tls_config = NULL;
 static struct altcp_tls_config *s_h2_tls_config = NULL;
 static bool s_nghttp2_smoke_logged = false;
@@ -82,6 +88,7 @@ static void (*s_prev_zend_interrupt_function)(zend_execute_data *execute_data) =
 #endif
 static const char s_env_wifi_ssid[] = RP2350_WIFI_SSID;
 static const char s_env_wifi_pass[] = RP2350_WIFI_PASS;
+static char s_sntp_server[64] = "pool.ntp.org";
 
 static bool rp2350_http_tls_config_ready(void);
 static bool rp2350_h2_tls_config_ready(void);
@@ -202,7 +209,9 @@ ZEND_FUNCTION(mcu_wifi_connect);
 ZEND_FUNCTION(mcu_wifi_disconnect);
 ZEND_FUNCTION(mcu_wifi_status);
 ZEND_FUNCTION(mcu_wifi_ip);
+ZEND_FUNCTION(mcu_ntp_sync);
 ZEND_FUNCTION(mcu_tcp_request);
+ZEND_FUNCTION(mcu_set_time);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_button_pressed, 0, 0, _IS_BOOL, 0)
@@ -284,12 +293,21 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_wifi_ip, 0, 0, MAY_BE_STRING | MAY_BE_FALSE)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_ntp_sync, 0, 0, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, server, IS_STRING, 1)
+	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_tcp_request, 0, 3, MAY_BE_STRING | MAY_BE_FALSE)
 	ZEND_ARG_TYPE_INFO(0, host, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO(0, port, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, payload, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
 	ZEND_ARG_TYPE_INFO(0, max_read, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_set_time, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, unix_time, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
 static const zend_function_entry rp2350_mcu_functions[] = {
@@ -313,7 +331,9 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_wifi_disconnect, arginfo_mcu_wifi_disconnect)
 	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
 	ZEND_FE(mcu_wifi_ip, arginfo_mcu_wifi_ip)
+	ZEND_FE(mcu_ntp_sync, arginfo_mcu_ntp_sync)
 	ZEND_FE(mcu_tcp_request, arginfo_mcu_tcp_request)
+	ZEND_FE(mcu_set_time, arginfo_mcu_set_time)
 	ZEND_FE_END
 };
 
@@ -420,6 +440,56 @@ static bool rp2350_wifi_init_once(void)
 	return true;
 }
 
+void rp2350_sntp_set_system_time_us(uint32_t sec, uint32_t us)
+{
+	struct timeval tv;
+	time_t t;
+	tv.tv_sec = (time_t)sec;
+	tv.tv_usec = (suseconds_t)us;
+	if (settimeofday(&tv, NULL) == 0) {
+		t = (time_t)sec;
+		(void)rp2350_rtc_set_unix_time(t);
+		s_sntp_sync_seen = true;
+		s_sntp_sync_count++;
+	}
+}
+
+static bool rp2350_sntp_sync_once(const char *server, uint32_t timeout_ms)
+{
+	absolute_time_t deadline;
+	uint32_t start_count;
+	bool synced = false;
+
+	if (timeout_ms < 100u) {
+		timeout_ms = 100u;
+	}
+	deadline = make_timeout_time_ms(timeout_ms);
+
+	s_sntp_sync_seen = false;
+	start_count = s_sntp_sync_count;
+
+	cyw43_arch_lwip_begin();
+	sntp_stop();
+	sntp_setoperatingmode(SNTP_OPMODE_POLL);
+	sntp_setservername(0, (char *)server);
+	sntp_init();
+	cyw43_arch_lwip_end();
+
+	while (!time_reached(deadline)) {
+		if (s_sntp_sync_seen || s_sntp_sync_count != start_count) {
+			synced = true;
+			break;
+		}
+		sleep_ms(10);
+	}
+
+	cyw43_arch_lwip_begin();
+	sntp_stop();
+	cyw43_arch_lwip_end();
+
+	return synced;
+}
+
 static bool rp2350_http_tls_config_ready(void)
 {
 	static const char *s_http1_alpn[] = { "http/1.1", NULL };
@@ -429,7 +499,7 @@ static bool rp2350_http_tls_config_ready(void)
 	}
 
 	cyw43_arch_lwip_begin();
-	s_http_tls_config = altcp_tls_create_config_client(NULL, 0);
+	s_http_tls_config = altcp_tls_create_config_client(rp2350_ca_bundle_pem, rp2350_ca_bundle_pem_len);
 	if (s_http_tls_config != NULL) {
 		if (altcp_tls_configure_alpn_protocols(s_http_tls_config, s_http1_alpn) != 0) {
 			altcp_tls_free_config(s_http_tls_config);
@@ -450,7 +520,7 @@ static bool rp2350_h2_tls_config_ready(void)
 	}
 
 	cyw43_arch_lwip_begin();
-	s_h2_tls_config = altcp_tls_create_config_client(NULL, 0);
+	s_h2_tls_config = altcp_tls_create_config_client(rp2350_ca_bundle_pem, rp2350_ca_bundle_pem_len);
 	if (s_h2_tls_config != NULL) {
 		if (altcp_tls_configure_alpn_protocols(s_h2_tls_config, s_h2_alpn) != 0) {
 			altcp_tls_free_config(s_h2_tls_config);
@@ -2108,6 +2178,8 @@ static php_stream *rp2350_http_stream_opener(
 	rp2350_h2_tls_alloc_ctx_t tls_ctx = {0};
 	php_stream *stream = NULL;
 	const char *alpn = NULL;
+	int connect_attempt = 0;
+	int connect_attempts = 1;
 
 	(void)context;
 
@@ -2122,40 +2194,44 @@ static php_stream *rp2350_http_stream_opener(
 	}
 
 	if (!rp2350_parse_http_url(filename, host, sizeof(host), &port, &path, &is_https)) {
-		if (options & REPORT_ERRORS) {
-			php_error_docref(NULL, E_WARNING, "http url parse failed: %s", filename ? filename : "<null>");
-		}
+		php_stream_wrapper_log_error(wrapper, options, "url parse failed: %s", filename ? filename : "<null>");
 		return NULL;
 	}
 
 	if (!rp2350_wifi_init_once()) {
+		php_stream_wrapper_log_error(wrapper, options, "wifi init failed");
 		return NULL;
 	}
 	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
+		php_stream_wrapper_log_error(wrapper, options, "wifi not connected");
 		return NULL;
 	}
 	if (!rp2350_dns_resolve(host, 8000, &remote)) {
+		php_stream_wrapper_log_error(wrapper, options, "dns resolve failed: %s", host);
 		return NULL;
 	}
 
 	if (is_https && !rp2350_h2_tls_config_ready()) {
+		php_stream_wrapper_log_error(wrapper, options, "https tls config not ready");
 		return NULL;
 	}
 
 	st = (rp2350_http_stream_data_t *)ecalloc(1, sizeof(*st));
 	if (!st) {
+		php_stream_wrapper_log_error(wrapper, options, "state alloc failed");
 		return NULL;
 	}
 	st->timeout_ms = 8000;
 	st->net.rx_cap = 32768;
 	st->net.rx = (char *)malloc(st->net.rx_cap + 1);
 	if (!st->net.rx) {
+		php_stream_wrapper_log_error(wrapper, options, "rx alloc failed");
 		efree(st);
 		return NULL;
 	}
 	st->net.last_rx_time = get_absolute_time();
-	deadline = make_timeout_time_ms(st->timeout_ms);
 	st->mode = RP2350_HTTP_STREAM_MODE_H1;
+	connect_attempts = is_https ? 2 : 1;
 
 	if (is_https) {
 		tls_ctx.config = s_h2_tls_config;
@@ -2164,29 +2240,93 @@ static php_stream *rp2350_http_stream_opener(
 		tls_allocator.arg = &tls_ctx;
 	}
 
-	cyw43_arch_lwip_begin();
-	st->net.pcb = altcp_new_ip_type(is_https ? &tls_allocator : NULL, IP_GET_TYPE(&remote));
-	if (st->net.pcb != NULL) {
-		altcp_arg(st->net.pcb, &st->net);
-		altcp_recv(st->net.pcb, rp2350_h2_altcp_recv_cb);
-		altcp_err(st->net.pcb, rp2350_h2_altcp_err_cb);
-		st->net.last_err = altcp_connect(st->net.pcb, &remote, port, rp2350_h2_altcp_connected_cb);
-		if (st->net.last_err != ERR_OK) {
-			altcp_arg(st->net.pcb, NULL);
-			altcp_recv(st->net.pcb, NULL);
-			altcp_err(st->net.pcb, NULL);
-			altcp_abort(st->net.pcb);
-			st->net.pcb = NULL;
+	for (connect_attempt = 0; connect_attempt < connect_attempts; connect_attempt++) {
+		deadline = make_timeout_time_ms(st->timeout_ms);
+		st->net.connected = false;
+		st->net.had_error = false;
+		st->net.done = false;
+		st->net.last_err = ERR_OK;
+		st->net.pcb = NULL;
+
+		cyw43_arch_lwip_begin();
+		st->net.pcb = altcp_new_ip_type(is_https ? &tls_allocator : NULL, IP_GET_TYPE(&remote));
+		if (st->net.pcb != NULL) {
+			altcp_arg(st->net.pcb, &st->net);
+			altcp_recv(st->net.pcb, rp2350_h2_altcp_recv_cb);
+			altcp_err(st->net.pcb, rp2350_h2_altcp_err_cb);
+			st->net.last_err = altcp_connect(st->net.pcb, &remote, port, rp2350_h2_altcp_connected_cb);
+			if (st->net.last_err != ERR_OK) {
+				altcp_arg(st->net.pcb, NULL);
+				altcp_recv(st->net.pcb, NULL);
+				altcp_err(st->net.pcb, NULL);
+				altcp_abort(st->net.pcb);
+				st->net.pcb = NULL;
+			}
+		}
+		cyw43_arch_lwip_end();
+
+		if (st->net.pcb != NULL && rp2350_lwip_wait_until(deadline, &st->net.connected) && !st->net.had_error) {
+			break;
+		}
+
+		rp2350_h2_altcp_close(&st->net);
+		if (connect_attempt + 1 < connect_attempts) {
+			sleep_ms(50);
 		}
 	}
-	cyw43_arch_lwip_end();
-	if (st->net.pcb == NULL) {
-		free(st->net.rx);
-		efree(st);
-		return NULL;
-	}
-
-	if (!rp2350_lwip_wait_until(deadline, &st->net.connected) || st->net.had_error) {
+	if (st->net.pcb == NULL || !st->net.connected || st->net.had_error) {
+		if (is_https && st->net.pcb != NULL) {
+			const char *tls_alpn = NULL;
+			const char *tls_ver = NULL;
+			const char *tls_cipher = NULL;
+			uint32_t tls_verify = 0;
+			bool tls_ctx_ok = false;
+			cyw43_arch_lwip_begin();
+			{
+				void *tls = altcp_tls_context(st->net.pcb);
+				if (tls != NULL) {
+					mbedtls_ssl_context *ssl = (mbedtls_ssl_context *)tls;
+					tls_ctx_ok = true;
+					tls_alpn = mbedtls_ssl_get_alpn_protocol(ssl);
+					tls_ver = mbedtls_ssl_get_version(ssl);
+					tls_cipher = mbedtls_ssl_get_ciphersuite(ssl);
+					tls_verify = mbedtls_ssl_get_verify_result(ssl);
+				}
+			}
+			cyw43_arch_lwip_end();
+			if (tls_ctx_ok) {
+				php_stream_wrapper_log_error(
+					wrapper,
+					options,
+					"connect timeout/error lwip=%d connected=%d had_error=%d verify=0x%08" PRIx32 " ver=%s cipher=%s alpn=%s",
+					(int)st->net.last_err,
+					st->net.connected ? 1 : 0,
+					st->net.had_error ? 1 : 0,
+					tls_verify,
+					tls_ver ? tls_ver : "<null>",
+					tls_cipher ? tls_cipher : "<null>",
+					tls_alpn ? tls_alpn : "<null>"
+				);
+			} else {
+				php_stream_wrapper_log_error(
+					wrapper,
+					options,
+					"connect timeout/error lwip=%d connected=%d had_error=%d tls=<null>",
+					(int)st->net.last_err,
+					st->net.connected ? 1 : 0,
+					st->net.had_error ? 1 : 0
+				);
+			}
+		} else {
+			php_stream_wrapper_log_error(
+				wrapper,
+				options,
+				"connect timeout/error lwip=%d connected=%d had_error=%d",
+				(int)st->net.last_err,
+				st->net.connected ? 1 : 0,
+				st->net.had_error ? 1 : 0
+			);
+		}
 		rp2350_h2_altcp_close(&st->net);
 		free(st->net.rx);
 		efree(st);
@@ -2212,6 +2352,9 @@ static php_stream *rp2350_http_stream_opener(
 
 			rc = nghttp2_session_callbacks_new(&st->h2_callbacks);
 			if (rc != 0) {
+				if (options & REPORT_ERRORS) {
+					php_error_docref(NULL, E_WARNING, "https wrapper: h2 callbacks alloc failed: %d", rc);
+				}
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				efree(st);
@@ -2224,6 +2367,9 @@ static php_stream *rp2350_http_stream_opener(
 
 			rc = nghttp2_session_client_new(&st->h2_session, st->h2_callbacks, &st->h2);
 			if (rc != 0) {
+				if (options & REPORT_ERRORS) {
+					php_error_docref(NULL, E_WARNING, "https wrapper: h2 session alloc failed: %d", rc);
+				}
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				nghttp2_session_callbacks_del(st->h2_callbacks);
@@ -2233,6 +2379,9 @@ static php_stream *rp2350_http_stream_opener(
 
 			rc = nghttp2_submit_settings(st->h2_session, NGHTTP2_FLAG_NONE, NULL, 0);
 			if (rc != 0) {
+				if (options & REPORT_ERRORS) {
+					php_error_docref(NULL, E_WARNING, "https wrapper: h2 submit settings failed: %d", rc);
+				}
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				nghttp2_session_del(st->h2_session);
@@ -2265,6 +2414,9 @@ static php_stream *rp2350_http_stream_opener(
 
 			st->h2.stream_id = nghttp2_submit_request(st->h2_session, NULL, nva, 5, NULL, NULL);
 			if (st->h2.stream_id < 0) {
+				if (options & REPORT_ERRORS) {
+					php_error_docref(NULL, E_WARNING, "https wrapper: h2 submit request failed: %d", (int)st->h2.stream_id);
+				}
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				nghttp2_session_del(st->h2_session);
@@ -2275,6 +2427,9 @@ static php_stream *rp2350_http_stream_opener(
 
 			rc = nghttp2_session_send(st->h2_session);
 			if (rc != 0 || !rp2350_h2_flush_tx(&st->h2, &st->net, deadline)) {
+				if (options & REPORT_ERRORS) {
+					php_error_docref(NULL, E_WARNING, "https wrapper: h2 send failed: rc=%d lwip=%d", rc, (int)st->net.last_err);
+				}
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				nghttp2_session_del(st->h2_session);
@@ -2290,10 +2445,11 @@ static php_stream *rp2350_http_stream_opener(
 		size_t request_len = 0;
 		size_t off = 0;
 
-		if (!rp2350_http_build_get_request(host, path, &request, &request_len)) {
-			rp2350_h2_altcp_close(&st->net);
-			free(st->net.rx);
-			efree(st);
+			if (!rp2350_http_build_get_request(host, path, &request, &request_len)) {
+				php_stream_wrapper_log_error(wrapper, options, "request build failed");
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				efree(st);
 			return NULL;
 		}
 
@@ -2317,6 +2473,7 @@ static php_stream *rp2350_http_stream_opener(
 			}
 			cyw43_arch_lwip_end();
 			if (st->net.had_error || st->net.pcb == NULL) {
+				php_stream_wrapper_log_error(wrapper, options, "request write failed lwip=%d", (int)st->net.last_err);
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				free(request);
@@ -2325,6 +2482,7 @@ static php_stream *rp2350_http_stream_opener(
 			}
 			if (!wrote) {
 				if (time_reached(deadline)) {
+					php_stream_wrapper_log_error(wrapper, options, "request write timeout");
 					rp2350_h2_altcp_close(&st->net);
 					free(st->net.rx);
 					free(request);
@@ -2345,6 +2503,7 @@ static php_stream *rp2350_http_stream_opener(
 
 	stream = php_stream_alloc(&rp2350_http_stream_ops, st, 0, mode);
 	if (!stream) {
+		php_stream_wrapper_log_error(wrapper, options, "stream alloc failed");
 		rp2350_h2_altcp_close(&st->net);
 		free(st->net.rx);
 		efree(st);
@@ -2888,6 +3047,43 @@ ZEND_FUNCTION(mcu_wifi_ip)
 	RETURN_STRING(text);
 }
 
+ZEND_FUNCTION(mcu_ntp_sync)
+{
+	char *server = NULL;
+	size_t server_len = 0;
+	zend_long timeout_ms = 15000;
+	int status;
+
+	ZEND_PARSE_PARAMETERS_START(0, 2)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_STRING_OR_NULL(server, server_len)
+		Z_PARAM_LONG(timeout_ms)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (server == NULL || server_len == 0) {
+		server = s_sntp_server;
+		server_len = strlen(s_sntp_server);
+	}
+	if (server_len >= sizeof(s_sntp_server)) {
+		zend_argument_value_error(1, "must be <= 63 bytes");
+		RETURN_THROWS();
+	}
+	if (timeout_ms < 100) {
+		timeout_ms = 100;
+	}
+	if (!rp2350_wifi_init_once()) {
+		RETURN_FALSE;
+	}
+	status = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+	if (status != CYW43_LINK_UP) {
+		RETURN_FALSE;
+	}
+
+	memcpy(s_sntp_server, server, server_len);
+	s_sntp_server[server_len] = '\0';
+	RETURN_BOOL(rp2350_sntp_sync_once(s_sntp_server, (uint32_t)timeout_ms));
+}
+
 ZEND_FUNCTION(mcu_tcp_request)
 {
 	char *host = NULL;
@@ -2940,6 +3136,25 @@ ZEND_FUNCTION(mcu_tcp_request)
 	}
 	RETVAL_STRINGL(resp, resp_len);
 	free(resp);
+}
+
+ZEND_FUNCTION(mcu_set_time)
+{
+	zend_long unix_time = 0;
+	struct timeval tv;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(unix_time)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (unix_time < 0) {
+		zend_argument_value_error(1, "must be >= 0");
+		RETURN_THROWS();
+	}
+
+	tv.tv_sec = (time_t)unix_time;
+	tv.tv_usec = 0;
+	RETURN_BOOL(settimeofday(&tv, NULL) == 0);
 }
 
 

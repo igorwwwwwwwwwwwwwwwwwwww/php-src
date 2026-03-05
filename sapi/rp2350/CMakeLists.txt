@@ -184,6 +184,7 @@ set(RP2350_NGHTTP2_SOURCES
 )
 set(RP2350_PICOHTTPPARSER_SOURCES
   ${CMAKE_CURRENT_LIST_DIR}/third_party/picohttpparser/picohttpparser.c
+  ${PICO_SDK_PATH}/lib/lwip/src/apps/sntp/sntp.c
 )
 
 add_executable(php_mcu_firmware
@@ -191,6 +192,7 @@ add_executable(php_mcu_firmware
   src/fault_handlers.c
   src/rp2350_dns_stubs.c
   src/rp2350_vfs_syscalls.c
+  src/rp2350_ca_bundle.c
   rp2350_rtc.c
   rp2350_epd.cpp
   third_party/ssd1680/ssd1680.cpp

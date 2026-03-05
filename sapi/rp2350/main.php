@@ -84,6 +84,13 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
     print "\n";
 
     if ($wifi_ok && $wifi_status === MCU_WIFI_LINK_UP) {
+        $ntp_ok = mcu_ntp_sync('pool.ntp.org', 10000);
+        print "ntp:ok:";
+        print $ntp_ok ? "1" : "0";
+        print " now:";
+        print time();
+        print "\n";
+
         $req = "GET / HTTP/1.0\r\nHost: example.com\r\nConnection: close\r\n\r\n";
         $resp = mcu_tcp_request('example.com', 80, $req, 6000, 512);
         if ($resp === false) {

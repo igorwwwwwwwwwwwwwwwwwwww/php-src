@@ -126,6 +126,7 @@ Exposed PHP APIs:
 - `mcu_wifi_disconnect(): bool`
 - `mcu_wifi_status(): int`
 - `mcu_wifi_ip(): string|false`
+- `mcu_ntp_sync(?string $server = "pool.ntp.org", int $timeout_ms = 15000): bool`
 - `mcu_tcp_request(string $host, int $port, string $payload, int $timeout_ms = 5000, int $max_read = 4096): string|false`
 
 Wi-Fi status constants:
@@ -145,7 +146,13 @@ Current limitation:
   - HTTP/2 path via `nghttp2` when ALPN negotiates `h2`
   - HTTPS transport via lwIP `altcp_tls`
   - Supports both `file_get_contents()` and read-stream APIs (`fopen`/`fread`) for HTTP/HTTPS.
-- Current HTTPS bring-up does not use full certificate validation yet (policy tightening is TODO).
+- HTTPS uses a bundled Mozilla CA root set (`certs/mozilla-cacert.pem`) with verification required.
+- Refresh the embedded CA bundle with:
+  - `sapi/rp2350/tools/update-ca-bundle.sh`
+- CA chain-selection note (`example.com` / Cloudflare):
+  - Different TLS clients can receive different chain variants from the same host.
+  - On this target, Cloudflare may serve a chain ending at `AAA Certificate Services` instead of `SSL.com TLS ECC Root CA 2022`.
+  - To keep HTTPS verification stable on-device, the curated embedded bundle intentionally includes `AAA Certificate Services` (via `certs/extra/aaa_certificate_services.pem`) in addition to selected Mozilla roots.
 
 ## SWD debug (OpenOCD + GDB)
 
@@ -238,12 +245,23 @@ Allocator notes:
   - If async is too invasive, evaluate running EPD work on the second RP2350 core with safe handoff/synchronization.
 - Entropy hardening:
   - Add optional entropy seeding/mixing from external I2C sensor noise as an additional source (defense-in-depth on top of hardware RNG).
+- Time sync hardening:
+  - SNTP is now wired; add retry/backoff policy and periodic background resync.
+  - Add fallback servers and optional DHCP-provided NTP server handling.
+- PCRE/profile decision:
+  - Decide whether to include PCRE (`preg_*`) in the RP2350 profile or keep it omitted and document the reduced core function set clearly.
 - Explore JIT feasibility:
   - Investigate whether any constrained/partial opcache+JIT mode is viable on RP2350 (likely off by default, experimental only).
   - Document hard blockers (memory model, executable memory constraints, code cache placement, toolchain requirements).
 - Split large sources:
   - Break up oversized RP2350 integration files (especially `rp2350_eval_zend.c`) into focused units (networking, builtins, stream wrappers, runtime bootstrap).
   - Keep interfaces small and testable to reduce bring-up/debug friction.
+- Revisit directory/layout consistency:
+  - Normalize placement of RP2350 sources/headers (root vs `src/` vs `include/`) to one clear convention.
+  - Document the convention and move files incrementally to avoid churn.
+- Clarify lwIP source layering:
+  - Document exactly which files are consumed from `third_party/pico-sdk/lib/lwip/src` vs `third_party/pico-sdk/src/rp2_common/pico_lwip`.
+  - Capture why the RP2 common shim layer overrides/wraps parts of upstream lwIP and where to patch TLS behavior safely.
 - Firmware-visible error signaling:
   - Blink a dedicated LED pattern on PHP warning/error/fatal paths so failures are visible without UART attached.
   - Define stable severity-to-pattern mapping (warning vs fatal) and avoid blocking critical loops.
