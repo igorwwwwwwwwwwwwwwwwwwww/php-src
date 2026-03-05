@@ -33,8 +33,7 @@
 #include "src/rp2350_ca_bundle.h"
 #include "rp2350_eval.h"
 #include "rp2350_http_stream.h"
-
-extern bool rp2350_wifi_init_once(void);
+#include "rp2350_wifi.h"
 
 static struct altcp_tls_config *s_http_tls_config = NULL;
 static struct altcp_tls_config *s_h2_tls_config = NULL;
