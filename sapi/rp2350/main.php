@@ -12,6 +12,16 @@ function run_pcre_smoke() {
     }
 }
 
+function run_json_smoke() {
+    $s = json_encode(['mcu' => 'rp2350', 'ok' => true]);
+    $v = json_decode($s, true);
+    if (is_string($s) && is_array($v) && ($v['mcu'] ?? null) === 'rp2350' && ($v['ok'] ?? null) === true) {
+        print "json:ok\n";
+    } else {
+        print "json:fail\n";
+    }
+}
+
 function wifi_status_label($status) {
     if ($status === MCU_WIFI_LINK_UP) {
         return 'UP';
@@ -103,6 +113,7 @@ $wifi_ip4 = null;
 $wifi_ip6 = null;
 
 run_pcre_smoke();
+run_json_smoke();
 
 $wifi_ssid = getenv('WIFI_SSID');
 $wifi_pass = getenv('WIFI_PASS');

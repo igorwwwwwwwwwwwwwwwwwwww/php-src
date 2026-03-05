@@ -107,6 +107,12 @@ list(REMOVE_ITEM RP2350_STANDARD_SOURCES
   "${PHP_SRC_ROOT}/ext/standard/dns.c"
 )
 file(GLOB RP2350_RANDOM_SOURCES "${PHP_SRC_ROOT}/ext/random/*.c")
+set(RP2350_JSON_SOURCES
+  ${PHP_SRC_ROOT}/ext/json/json.c
+  ${PHP_SRC_ROOT}/ext/json/json_encoder.c
+  ${PHP_SRC_ROOT}/ext/json/json_parser.tab.c
+  ${PHP_SRC_ROOT}/ext/json/json_scanner.c
+)
 file(GLOB RP2350_URI_SOURCES "${PHP_SRC_ROOT}/ext/uri/*.c")
 file(GLOB RP2350_URIPARSER_SOURCES "${PHP_SRC_ROOT}/ext/uri/uriparser/src/*.c")
 set(RP2350_DATE_SOURCES
@@ -271,6 +277,7 @@ add_executable(php_mcu_firmware
   ${RP2350_STANDARD_SOURCES}
   ${PHP_SRC_ROOT}/ext/standard/libavifinfo/avifinfo.c
   ${RP2350_RANDOM_SOURCES}
+  ${RP2350_JSON_SOURCES}
   ${RP2350_PCRE_SOURCES}
   ${RP2350_URI_SOURCES}
   ${RP2350_URIPARSER_SOURCES}
