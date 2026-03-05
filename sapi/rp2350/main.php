@@ -59,7 +59,7 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
 
     $buf = mcu_fb_create(MCU_EPD_WIDTH, MCU_EPD_HEIGHT, false);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 16, 'PHP RP2350', 3, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 54, 'BUTTONS -> LEDS', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 54, 'PHP ' . PHP_VERSION, 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 78, 'BAT', 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 70, 78, (string)$batt_pct, 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 114, 78, $usb_connected ? 'USB' : 'BAT', 2, 2);
