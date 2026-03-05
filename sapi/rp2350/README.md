@@ -245,27 +245,27 @@ Allocator notes:
   - Keep a small startup-persistent arena for module/arginfo/class metadata.
   - Add real `malloc/free/realloc` semantics in PSRAM for long-lived runtime allocations.
   - Route only truly persistent allocations to the persistent arena.
-- Refine button interrupt wait/scheduler path:
-  - Current `mcu_button_wait()` is semaphore+IRQ wake with timeout and works for responsiveness.
-  - Revisit precise 1 Hz scheduling strategy (the prior `hrtime`/deadline variant caused stalls on target).
-  - Add low-level button IRQ diagnostics (`irq count`, `wake count`, `timeout count`) to aid tuning.
-- Make EPD updates non-blocking:
-  - Explore async e-ink refresh pipeline to avoid blocking PHP execution during render/update.
-  - If async is too invasive, evaluate running EPD work on the second RP2350 core with safe handoff/synchronization.
+- Power/scheduling lifecycle:
+  - Refine button interrupt wait/scheduler path:
+    - Current `mcu_button_wait()` is semaphore+IRQ wake with timeout and works for responsiveness.
+    - Revisit precise 1 Hz scheduling strategy (the prior `hrtime`/deadline variant caused stalls on target).
+    - Add low-level button IRQ diagnostics (`irq count`, `wake count`, `timeout count`) to aid tuning.
+  - Make EPD updates non-blocking:
+    - Explore async e-ink refresh pipeline to avoid blocking PHP execution during render/update.
+    - If async is too invasive, evaluate running EPD work on the second RP2350 core with safe handoff/synchronization.
+  - Add deep-sleep lifecycle:
+    - Add a controlled deep-sleep path with explicit peripheral bring-down before sleep and deterministic bring-up after wake.
+    - Define/validate re-init ordering for critical blocks (UART, Wi-Fi/CYW43, PSRAM/QMI, EPD, ADC, timers/IRQs) to avoid wake-time hangs.
 - Entropy hardening:
   - Add optional entropy seeding/mixing from external I2C sensor noise as an additional source (defense-in-depth on top of hardware RNG).
 - Time sync hardening:
   - SNTP is now wired; add retry/backoff policy and periodic background resync.
   - Add fallback servers and optional DHCP-provided NTP server handling.
 - Network diagnostics baseline:
-  - Ensure reliable ICMP echo reply behavior for both IPv4 (`ping`) and IPv6 (`ping6`) on the active STA interface.
   - Add a simple smoke check (or runtime counter) so ICMP/ICMPv6 responsiveness regressions are visible during bring-up.
 - Add mDNS support:
   - Evaluate lwIP mDNS responder/client integration for device discovery on local networks.
   - Define minimal RP2350 surface (hostname announce + lookup) and a basic smoke test (`*.local` resolution).
-- Deep sleep lifecycle:
-  - Add a controlled deep-sleep path with explicit peripheral bring-down before sleep and deterministic bring-up after wake.
-  - Define/validate re-init ordering for critical blocks (UART, Wi-Fi/CYW43, PSRAM/QMI, EPD, ADC, timers/IRQs) to avoid wake-time hangs.
 - PCRE/profile decision:
   - Decide whether to include PCRE (`preg_*`) in the RP2350 profile or keep it omitted and document the reduced core function set clearly.
 - Explore JIT feasibility:
