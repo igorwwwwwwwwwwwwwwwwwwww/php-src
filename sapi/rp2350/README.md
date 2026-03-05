@@ -259,6 +259,9 @@ Allocator notes:
 - Network diagnostics baseline:
   - Ensure reliable ICMP echo reply behavior for both IPv4 (`ping`) and IPv6 (`ping6`) on the active STA interface.
   - Add a simple smoke check (or runtime counter) so ICMP/ICMPv6 responsiveness regressions are visible during bring-up.
+- Add mDNS support:
+  - Evaluate lwIP mDNS responder/client integration for device discovery on local networks.
+  - Define minimal RP2350 surface (hostname announce + lookup) and a basic smoke test (`*.local` resolution).
 - PCRE/profile decision:
   - Decide whether to include PCRE (`preg_*`) in the RP2350 profile or keep it omitted and document the reduced core function set clearly.
 - Explore JIT feasibility:
