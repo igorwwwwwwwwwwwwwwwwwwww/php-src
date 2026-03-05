@@ -422,12 +422,20 @@ static bool rp2350_wifi_init_once(void)
 
 static bool rp2350_http_tls_config_ready(void)
 {
+	static const char *s_http1_alpn[] = { "http/1.1", NULL };
+
 	if (s_http_tls_config != NULL) {
 		return true;
 	}
 
 	cyw43_arch_lwip_begin();
 	s_http_tls_config = altcp_tls_create_config_client(NULL, 0);
+	if (s_http_tls_config != NULL) {
+		if (altcp_tls_configure_alpn_protocols(s_http_tls_config, s_http1_alpn) != 0) {
+			altcp_tls_free_config(s_http_tls_config);
+			s_http_tls_config = NULL;
+		}
+	}
 	cyw43_arch_lwip_end();
 
 	return s_http_tls_config != NULL;
@@ -767,6 +775,8 @@ typedef struct {
 	char *body;
 	size_t body_len;
 	size_t body_cap;
+	size_t body_limit;
+	bool body_dynamic;
 	bool body_truncated;
 	int status_code;
 	int32_t stream_id;
@@ -850,6 +860,25 @@ static int rp2350_h2_on_data_chunk_recv_cb(nghttp2_session *session, uint8_t fla
 	(void)flags;
 
 	if (stream_id != ctx->stream_id || len == 0) {
+		return 0;
+	}
+
+	if (ctx->body_dynamic) {
+		if (ctx->body_limit > 0 && ctx->body_len >= ctx->body_limit) {
+			ctx->body_truncated = true;
+			return 0;
+		}
+		take = len;
+		if (ctx->body_limit > 0) {
+			size_t remain = ctx->body_limit - ctx->body_len;
+			if (take > remain) {
+				take = remain;
+				ctx->body_truncated = true;
+			}
+		}
+		if (take > 0 && !rp2350_h2_buf_append(&ctx->body, &ctx->body_len, &ctx->body_cap, data, take)) {
+			return NGHTTP2_ERR_CALLBACK_FAILURE;
+		}
 		return 0;
 	}
 
@@ -1245,6 +1274,8 @@ static bool rp2350_h2_get_body_ex(
 		return false;
 	}
 	ctx.body_cap = max_read;
+	ctx.body_limit = max_read;
+	ctx.body_dynamic = false;
 	rx_cap = max_read + 32768;
 	net.rx = (char *)malloc(rx_cap + 1);
 	if (!net.rx) {
@@ -1814,6 +1845,249 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	return true;
 }
 
+typedef enum {
+	RP2350_HTTP_STREAM_MODE_H1 = 0,
+	RP2350_HTTP_STREAM_MODE_H2 = 1,
+} rp2350_http_stream_mode_t;
+
+typedef struct {
+	rp2350_altcp_ctx_t net;
+	uint32_t timeout_ms;
+	rp2350_http_stream_mode_t mode;
+	bool headers_done;
+	bool response_parsed;
+	nghttp2_session_callbacks *h2_callbacks;
+	nghttp2_session *h2_session;
+	rp2350_h2_ctx_t h2;
+} rp2350_http_stream_data_t;
+
+static ssize_t rp2350_http_stream_write(php_stream *stream, const char *buf, size_t count)
+{
+	(void)stream;
+	(void)buf;
+	(void)count;
+	return -1;
+}
+
+static ssize_t rp2350_http_stream_read(php_stream *stream, char *buf, size_t count)
+{
+	rp2350_http_stream_data_t *st = (rp2350_http_stream_data_t *)stream->abstract;
+	absolute_time_t deadline;
+
+	if (!st || count == 0) {
+		return 0;
+	}
+
+	deadline = make_timeout_time_ms(st->timeout_ms);
+
+	if (st->mode == RP2350_HTTP_STREAM_MODE_H2) {
+		while (true) {
+			bool done = false;
+			bool had_error = false;
+			ssize_t parsed = 0;
+
+			if (st->h2.body_len > 0) {
+				size_t take = (count < st->h2.body_len) ? count : st->h2.body_len;
+				memcpy(buf, st->h2.body, take);
+				if (take < st->h2.body_len) {
+					memmove(st->h2.body, st->h2.body + take, st->h2.body_len - take);
+				}
+				st->h2.body_len -= take;
+				return (ssize_t)take;
+			}
+			if (st->h2.stream_closed) {
+				stream->eof = 1;
+				return 0;
+			}
+
+			cyw43_arch_lwip_begin();
+			done = st->net.done;
+			had_error = st->net.had_error;
+			if (st->net.rx_len > 0) {
+				parsed = nghttp2_session_mem_recv(
+					st->h2_session,
+					(const uint8_t *)st->net.rx,
+					st->net.rx_len
+				);
+				if (parsed >= 0) {
+					size_t used = (size_t)parsed;
+					if (used < st->net.rx_len) {
+						memmove(st->net.rx, st->net.rx + used, st->net.rx_len - used);
+					}
+					st->net.rx_len -= used;
+				}
+			}
+			cyw43_arch_lwip_end();
+
+			if (parsed < 0) {
+				stream->eof = 1;
+				return 0;
+			}
+			if (had_error || done) {
+				stream->eof = 1;
+				return 0;
+			}
+
+			if (parsed > 0) {
+				int rc = nghttp2_session_send(st->h2_session);
+				if (rc != 0) {
+					stream->eof = 1;
+					return 0;
+				}
+				if (!rp2350_h2_flush_tx(&st->h2, &st->net, deadline)) {
+					stream->eof = 1;
+					return 0;
+				}
+				continue;
+			}
+
+			if (time_reached(deadline)) {
+				stream->eof = 1;
+				return 0;
+			}
+			sleep_ms(1);
+		}
+	}
+
+	while (true) {
+		size_t rx_len = 0;
+		bool done = false;
+		bool had_error = false;
+
+		cyw43_arch_lwip_begin();
+		rx_len = st->net.rx_len;
+		done = st->net.done;
+		had_error = st->net.had_error;
+
+		if (!st->headers_done && rx_len > 0) {
+			size_t i;
+			size_t parsed = 0;
+			for (i = 0; i + 3 < rx_len; i++) {
+				if (st->net.rx[i] == '\r' && st->net.rx[i + 1] == '\n' && st->net.rx[i + 2] == '\r' && st->net.rx[i + 3] == '\n') {
+					parsed = i + 4;
+					break;
+				}
+			}
+			if (parsed > 0) {
+				if (!st->response_parsed) {
+					int minor_version = 0;
+					int status = 0;
+					const char *msg = NULL;
+					size_t msg_len = 0;
+					struct phr_header headers[48];
+					size_t num_headers = sizeof(headers) / sizeof(headers[0]);
+					int rc = phr_parse_response(
+						st->net.rx,
+						parsed,
+						&minor_version,
+						&status,
+						&msg,
+						&msg_len,
+						headers,
+						&num_headers,
+						0
+					);
+					if (rc <= 0) {
+						st->net.had_error = true;
+						cyw43_arch_lwip_end();
+						stream->eof = 1;
+						return 0;
+					}
+					st->response_parsed = true;
+				}
+				if (parsed < st->net.rx_len) {
+					memmove(st->net.rx, st->net.rx + parsed, st->net.rx_len - parsed);
+				}
+				st->net.rx_len -= parsed;
+				st->headers_done = true;
+				rx_len = st->net.rx_len;
+			}
+		}
+
+		if (st->headers_done && rx_len > 0) {
+			size_t take = (count < rx_len) ? count : rx_len;
+			memcpy(buf, st->net.rx, take);
+			if (take < st->net.rx_len) {
+				memmove(st->net.rx, st->net.rx + take, st->net.rx_len - take);
+			}
+			st->net.rx_len -= take;
+			cyw43_arch_lwip_end();
+			return (ssize_t)take;
+		}
+		cyw43_arch_lwip_end();
+
+		if (had_error || (done && st->headers_done)) {
+			stream->eof = 1;
+			return 0;
+		}
+		if (done && !st->headers_done) {
+			stream->eof = 1;
+			return 0;
+		}
+		if (time_reached(deadline)) {
+			stream->eof = 1;
+			return 0;
+		}
+		sleep_ms(1);
+	}
+}
+
+static int rp2350_http_stream_close(php_stream *stream, int close_handle)
+{
+	rp2350_http_stream_data_t *st = (rp2350_http_stream_data_t *)stream->abstract;
+	(void)close_handle;
+	if (!st) {
+		return 0;
+	}
+	rp2350_h2_altcp_close(&st->net);
+	if (st->net.rx) {
+		free(st->net.rx);
+		st->net.rx = NULL;
+	}
+	if (st->h2_session) {
+		nghttp2_session_del(st->h2_session);
+		st->h2_session = NULL;
+	}
+	if (st->h2_callbacks) {
+		nghttp2_session_callbacks_del(st->h2_callbacks);
+		st->h2_callbacks = NULL;
+	}
+	free(st->h2.tx);
+	st->h2.tx = NULL;
+	free(st->h2.body);
+	st->h2.body = NULL;
+	efree(st);
+	stream->abstract = NULL;
+	return 0;
+}
+
+static int rp2350_http_stream_flush(php_stream *stream)
+{
+	(void)stream;
+	return 0;
+}
+
+static int rp2350_http_stream_seek(php_stream *stream, zend_off_t offset, int whence, zend_off_t *newoffs)
+{
+	(void)stream;
+	(void)offset;
+	(void)whence;
+	(void)newoffs;
+	return -1;
+}
+
+static const php_stream_ops rp2350_http_stream_ops = {
+	rp2350_http_stream_write,
+	rp2350_http_stream_read,
+	rp2350_http_stream_close,
+	rp2350_http_stream_flush,
+	"rp2350_http_stream",
+	rp2350_http_stream_seek,
+	NULL,
+	NULL,
+	NULL
+};
+
 static php_stream *rp2350_http_stream_opener(
 	php_stream_wrapper *wrapper,
 	const char *filename,
@@ -1823,10 +2097,17 @@ static php_stream *rp2350_http_stream_opener(
 	php_stream_context *context STREAMS_DC
 )
 {
-	char *body = NULL;
-	size_t body_len = 0;
-	zend_string *zbody = NULL;
+	char host[96];
+	u16_t port;
+	const char *path;
+	bool is_https = false;
+	ip_addr_t remote;
+	absolute_time_t deadline;
+	rp2350_http_stream_data_t *st = NULL;
+	altcp_allocator_t tls_allocator = {0};
+	rp2350_h2_tls_alloc_ctx_t tls_ctx = {0};
 	php_stream *stream = NULL;
+	const char *alpn = NULL;
 
 	(void)context;
 
@@ -1840,19 +2121,233 @@ static php_stream *rp2350_http_stream_opener(
 		return NULL;
 	}
 
-	if (!rp2350_http_get_body(filename, 8000, 131072, &body, &body_len)) {
+	if (!rp2350_parse_http_url(filename, host, sizeof(host), &port, &path, &is_https)) {
+		if (options & REPORT_ERRORS) {
+			php_error_docref(NULL, E_WARNING, "http url parse failed: %s", filename ? filename : "<null>");
+		}
 		return NULL;
 	}
 
-	zbody = zend_string_init(body, body_len, 0);
-	free(body);
-	if (!zbody) {
+	if (!rp2350_wifi_init_once()) {
+		return NULL;
+	}
+	if (cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA) != CYW43_LINK_UP) {
+		return NULL;
+	}
+	if (!rp2350_dns_resolve(host, 8000, &remote)) {
 		return NULL;
 	}
 
-	stream = php_stream_memory_open(TEMP_STREAM_READONLY, zbody);
-	zend_string_release(zbody);
+	if (is_https && !rp2350_h2_tls_config_ready()) {
+		return NULL;
+	}
+
+	st = (rp2350_http_stream_data_t *)ecalloc(1, sizeof(*st));
+	if (!st) {
+		return NULL;
+	}
+	st->timeout_ms = 8000;
+	st->net.rx_cap = 32768;
+	st->net.rx = (char *)malloc(st->net.rx_cap + 1);
+	if (!st->net.rx) {
+		efree(st);
+		return NULL;
+	}
+	st->net.last_rx_time = get_absolute_time();
+	deadline = make_timeout_time_ms(st->timeout_ms);
+	st->mode = RP2350_HTTP_STREAM_MODE_H1;
+
+	if (is_https) {
+		tls_ctx.config = s_h2_tls_config;
+		tls_ctx.hostname = host;
+		tls_allocator.alloc = rp2350_h2_tls_alloc_with_sni;
+		tls_allocator.arg = &tls_ctx;
+	}
+
+	cyw43_arch_lwip_begin();
+	st->net.pcb = altcp_new_ip_type(is_https ? &tls_allocator : NULL, IP_GET_TYPE(&remote));
+	if (st->net.pcb != NULL) {
+		altcp_arg(st->net.pcb, &st->net);
+		altcp_recv(st->net.pcb, rp2350_h2_altcp_recv_cb);
+		altcp_err(st->net.pcb, rp2350_h2_altcp_err_cb);
+		st->net.last_err = altcp_connect(st->net.pcb, &remote, port, rp2350_h2_altcp_connected_cb);
+		if (st->net.last_err != ERR_OK) {
+			altcp_arg(st->net.pcb, NULL);
+			altcp_recv(st->net.pcb, NULL);
+			altcp_err(st->net.pcb, NULL);
+			altcp_abort(st->net.pcb);
+			st->net.pcb = NULL;
+		}
+	}
+	cyw43_arch_lwip_end();
+	if (st->net.pcb == NULL) {
+		free(st->net.rx);
+		efree(st);
+		return NULL;
+	}
+
+	if (!rp2350_lwip_wait_until(deadline, &st->net.connected) || st->net.had_error) {
+		rp2350_h2_altcp_close(&st->net);
+		free(st->net.rx);
+		efree(st);
+		return NULL;
+	}
+
+	if (is_https) {
+		cyw43_arch_lwip_begin();
+		if (st->net.pcb != NULL) {
+			void *tls = altcp_tls_context(st->net.pcb);
+			if (tls != NULL) {
+				alpn = mbedtls_ssl_get_alpn_protocol((mbedtls_ssl_context *)tls);
+			}
+		}
+		cyw43_arch_lwip_end();
+		if (alpn != NULL && strcmp(alpn, "h2") == 0) {
+			nghttp2_nv nva[5];
+			int rc;
+
+			st->mode = RP2350_HTTP_STREAM_MODE_H2;
+			st->h2.body_dynamic = true;
+			st->h2.body_limit = 131072;
+
+			rc = nghttp2_session_callbacks_new(&st->h2_callbacks);
+			if (rc != 0) {
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				efree(st);
+				return NULL;
+			}
+			nghttp2_session_callbacks_set_send_callback(st->h2_callbacks, rp2350_h2_send_cb);
+			nghttp2_session_callbacks_set_on_header_callback(st->h2_callbacks, rp2350_h2_on_header_cb);
+			nghttp2_session_callbacks_set_on_data_chunk_recv_callback(st->h2_callbacks, rp2350_h2_on_data_chunk_recv_cb);
+			nghttp2_session_callbacks_set_on_stream_close_callback(st->h2_callbacks, rp2350_h2_on_stream_close_cb);
+
+			rc = nghttp2_session_client_new(&st->h2_session, st->h2_callbacks, &st->h2);
+			if (rc != 0) {
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				nghttp2_session_callbacks_del(st->h2_callbacks);
+				efree(st);
+				return NULL;
+			}
+
+			rc = nghttp2_submit_settings(st->h2_session, NGHTTP2_FLAG_NONE, NULL, 0);
+			if (rc != 0) {
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				nghttp2_session_del(st->h2_session);
+				nghttp2_session_callbacks_del(st->h2_callbacks);
+				efree(st);
+				return NULL;
+			}
+
+			memset(nva, 0, sizeof(nva));
+			nva[0].name = (uint8_t *)":method";
+			nva[0].value = (uint8_t *)"GET";
+			nva[0].namelen = sizeof(":method") - 1;
+			nva[0].valuelen = sizeof("GET") - 1;
+			nva[1].name = (uint8_t *)":scheme";
+			nva[1].value = (uint8_t *)"https";
+			nva[1].namelen = sizeof(":scheme") - 1;
+			nva[1].valuelen = sizeof("https") - 1;
+			nva[2].name = (uint8_t *)":authority";
+			nva[2].value = (uint8_t *)host;
+			nva[2].namelen = sizeof(":authority") - 1;
+			nva[2].valuelen = strlen(host);
+			nva[3].name = (uint8_t *)":path";
+			nva[3].value = (uint8_t *)path;
+			nva[3].namelen = sizeof(":path") - 1;
+			nva[3].valuelen = strlen(path);
+			nva[4].name = (uint8_t *)"user-agent";
+			nva[4].value = (uint8_t *)"rp2350-php";
+			nva[4].namelen = sizeof("user-agent") - 1;
+			nva[4].valuelen = sizeof("rp2350-php") - 1;
+
+			st->h2.stream_id = nghttp2_submit_request(st->h2_session, NULL, nva, 5, NULL, NULL);
+			if (st->h2.stream_id < 0) {
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				nghttp2_session_del(st->h2_session);
+				nghttp2_session_callbacks_del(st->h2_callbacks);
+				efree(st);
+				return NULL;
+			}
+
+			rc = nghttp2_session_send(st->h2_session);
+			if (rc != 0 || !rp2350_h2_flush_tx(&st->h2, &st->net, deadline)) {
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				nghttp2_session_del(st->h2_session);
+				nghttp2_session_callbacks_del(st->h2_callbacks);
+				efree(st);
+				return NULL;
+			}
+		}
+	}
+
+	if (st->mode == RP2350_HTTP_STREAM_MODE_H1) {
+		char *request = NULL;
+		size_t request_len = 0;
+		size_t off = 0;
+
+		if (!rp2350_http_build_get_request(host, path, &request, &request_len)) {
+			rp2350_h2_altcp_close(&st->net);
+			free(st->net.rx);
+			efree(st);
+			return NULL;
+		}
+
+		while (off < request_len) {
+			bool wrote = false;
+			cyw43_arch_lwip_begin();
+			if (st->net.pcb != NULL) {
+				u16_t snd = altcp_sndbuf(st->net.pcb);
+				if (snd > 0) {
+					u16_t chunk = (u16_t)((request_len - off) < snd ? (request_len - off) : snd);
+					err_t w = altcp_write(st->net.pcb, request + off, chunk, TCP_WRITE_FLAG_COPY);
+					if (w == ERR_OK) {
+						off += chunk;
+						(void)altcp_output(st->net.pcb);
+						wrote = true;
+					} else if (w != ERR_MEM) {
+						st->net.had_error = true;
+						st->net.last_err = w;
+					}
+				}
+			}
+			cyw43_arch_lwip_end();
+			if (st->net.had_error || st->net.pcb == NULL) {
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				free(request);
+				efree(st);
+				return NULL;
+			}
+			if (!wrote) {
+				if (time_reached(deadline)) {
+					rp2350_h2_altcp_close(&st->net);
+					free(st->net.rx);
+					free(request);
+					efree(st);
+					return NULL;
+				}
+				sleep_ms(1);
+			}
+		}
+		free(request);
+
+		cyw43_arch_lwip_begin();
+		if (st->net.pcb != NULL) {
+			(void)altcp_shutdown(st->net.pcb, 0, 1);
+		}
+		cyw43_arch_lwip_end();
+	}
+
+	stream = php_stream_alloc(&rp2350_http_stream_ops, st, 0, mode);
 	if (!stream) {
+		rp2350_h2_altcp_close(&st->net);
+		free(st->net.rx);
+		efree(st);
 		return NULL;
 	}
 	stream->wrapper = wrapper;

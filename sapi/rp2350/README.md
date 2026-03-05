@@ -144,6 +144,7 @@ Current limitation:
   - HTTP/1.1 parsing via `picohttpparser`
   - HTTP/2 path via `nghttp2` when ALPN negotiates `h2`
   - HTTPS transport via lwIP `altcp_tls`
+  - Supports both `file_get_contents()` and read-stream APIs (`fopen`/`fread`) for HTTP/HTTPS.
 - Current HTTPS bring-up does not use full certificate validation yet (policy tightening is TODO).
 
 ## SWD debug (OpenOCD + GDB)
