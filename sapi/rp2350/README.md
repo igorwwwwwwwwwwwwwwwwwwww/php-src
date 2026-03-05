@@ -262,6 +262,9 @@ Allocator notes:
 - Add mDNS support:
   - Evaluate lwIP mDNS responder/client integration for device discovery on local networks.
   - Define minimal RP2350 surface (hostname announce + lookup) and a basic smoke test (`*.local` resolution).
+- Deep sleep lifecycle:
+  - Add a controlled deep-sleep path with explicit peripheral bring-down before sleep and deterministic bring-up after wake.
+  - Define/validate re-init ordering for critical blocks (UART, Wi-Fi/CYW43, PSRAM/QMI, EPD, ADC, timers/IRQs) to avoid wake-time hangs.
 - PCRE/profile decision:
   - Decide whether to include PCRE (`preg_*`) in the RP2350 profile or keep it omitted and document the reduced core function set clearly.
 - Explore JIT feasibility:
