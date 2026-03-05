@@ -142,7 +142,9 @@ Current limitation:
 - This is connection/status/IP foundation only.
 - PHP stream/socket transport is still mostly stubbed in `src/rp2350_network_stubs.c`, so `ext/curl` and generic network streams are not wired yet.
 - TCP/UDP helpers above use lwIP raw APIs directly (under `NO_SYS=1`) and are intended as a bring-up path, not a full PHP sockets layer.
-- `http://` script loading is handled by the RP2350 Zend stream-open hook using lwIP HTTP client (`apps/http/http_client.c`), HTTP only (no TLS yet).
+- `http://` and `https://` loading is handled by the RP2350 Zend stream-open hook using lwIP HTTP client (`apps/http/http_client.c`) with `altcp_tls` for HTTPS.
+- lwIP `http_client` in this integration path does not provide an automatic dechunk helper; `Transfer-Encoding: chunked` responses may include chunk framing unless we dechunk in RP2350 wrapper code.
+- Current HTTPS bring-up uses lwIP/mbedTLS client config without an embedded CA bundle yet (verification policy tightening is TODO).
 
 ## SWD debug (OpenOCD + GDB)
 
@@ -233,6 +235,9 @@ Allocator notes:
 - Make EPD updates non-blocking:
   - Explore async e-ink refresh pipeline to avoid blocking PHP execution during render/update.
   - If async is too invasive, evaluate running EPD work on the second RP2350 core with safe handoff/synchronization.
+- Implement HTTP body dechunking for wrapper responses:
+  - Parse and strip HTTP/1.1 chunk framing in RP2350 stream wrapper path for `http://` and `https://`.
+  - Keep current behavior only as bring-up fallback/debug mode.
 
 ## Important constraints
 
