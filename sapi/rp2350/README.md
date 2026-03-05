@@ -153,6 +153,10 @@ Current limitation:
   - Different TLS clients can receive different chain variants from the same host.
   - On this target, Cloudflare may serve a chain ending at `AAA Certificate Services` instead of `SSL.com TLS ECC Root CA 2022`.
   - To keep HTTPS verification stable on-device, the curated embedded bundle intentionally includes `AAA Certificate Services` (via `certs/extra/aaa_certificate_services.pem`) in addition to selected Mozilla roots.
+- TLS version note:
+  - With current Pico lwIP + mbedTLS integration in this firmware, HTTPS negotiates TLS 1.2 in practice (`ver=TLSv1.2`).
+  - A TLS-1.3-only client configuration was tested and currently fails to connect on this target.
+  - Keep TLS 1.2 enabled as the compatibility baseline for now.
 
 ## SWD debug (OpenOCD + GDB)
 

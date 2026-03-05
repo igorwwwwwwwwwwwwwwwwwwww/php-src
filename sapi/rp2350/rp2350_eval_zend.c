@@ -2334,14 +2334,25 @@ static php_stream *rp2350_http_stream_opener(
 	}
 
 	if (is_https) {
+		const char *tls_ver = NULL;
+		const char *tls_cipher = NULL;
 		cyw43_arch_lwip_begin();
 		if (st->net.pcb != NULL) {
 			void *tls = altcp_tls_context(st->net.pcb);
 			if (tls != NULL) {
-				alpn = mbedtls_ssl_get_alpn_protocol((mbedtls_ssl_context *)tls);
+				mbedtls_ssl_context *ssl = (mbedtls_ssl_context *)tls;
+				alpn = mbedtls_ssl_get_alpn_protocol(ssl);
+				tls_ver = mbedtls_ssl_get_version(ssl);
+				tls_cipher = mbedtls_ssl_get_ciphersuite(ssl);
 			}
 		}
 		cyw43_arch_lwip_end();
+		printf(
+			"[tls] connected ver=%s cipher=%s alpn=%s\n",
+			tls_ver ? tls_ver : "<null>",
+			tls_cipher ? tls_cipher : "<null>",
+			alpn ? alpn : "<null>"
+		);
 		if (alpn != NULL && strcmp(alpn, "h2") == 0) {
 			nghttp2_nv nva[5];
 			int rc;
