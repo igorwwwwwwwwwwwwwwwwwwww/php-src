@@ -238,6 +238,8 @@ Allocator notes:
 - Implement HTTP body dechunking for wrapper responses:
   - Parse and strip HTTP/1.1 chunk framing in RP2350 stream wrapper path for `http://` and `https://`.
   - Keep current behavior only as bring-up fallback/debug mode.
+- Entropy hardening:
+  - Add optional entropy seeding/mixing from external I2C sensor noise as an additional source (defense-in-depth on top of hardware RNG).
 
 ## Important constraints
 

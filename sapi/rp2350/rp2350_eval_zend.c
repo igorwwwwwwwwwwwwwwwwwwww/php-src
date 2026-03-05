@@ -80,6 +80,8 @@ static void (*s_prev_zend_interrupt_function)(zend_execute_data *execute_data) =
 #endif
 static const char s_env_wifi_ssid[] = RP2350_WIFI_SSID;
 static const char s_env_wifi_pass[] = RP2350_WIFI_PASS;
+
+static bool rp2350_http_tls_config_ready(void);
 static const char rp2350_ini_entries[] =
 	"html_errors=0\n"
 	"display_errors=1\n"
@@ -91,6 +93,8 @@ static const char rp2350_ini_entries[] =
 	"memory_limit=32M\n";
 
 extern int mbedtls_hardware_poll(void *data, unsigned char *output, size_t len, size_t *olen);
+extern int altcp_tls_debug_last_stage;
+extern int altcp_tls_debug_last_ret;
 
 int mbedtls_platform_entropy_poll(void *data, unsigned char *output, size_t len, size_t *olen)
 {
@@ -417,7 +421,22 @@ static bool rp2350_wifi_init_once(void)
 	}
 	cyw43_arch_enable_sta_mode();
 	s_wifi_init = true;
+	/* Prewarm HTTPS config early to reduce later allocation failures. */
+	(void)rp2350_http_tls_config_ready();
 	return true;
+}
+
+static bool rp2350_http_tls_config_ready(void)
+{
+	if (s_http_tls_config != NULL) {
+		return true;
+	}
+
+	cyw43_arch_lwip_begin();
+	s_http_tls_config = altcp_tls_create_config_client(NULL, 0);
+	cyw43_arch_lwip_end();
+
+	return s_http_tls_config != NULL;
 }
 
 static uint16_t rp2350_adc_read_avg(uint input, uint samples)
@@ -918,13 +937,16 @@ static bool rp2350_http_get_body(const char *url, uint32_t timeout_ms, size_t ma
 	memset(&settings, 0, sizeof(settings));
 	settings.result_fn = rp2350_httpc_result_cb;
 	if (is_https) {
-		if (s_http_tls_config == NULL) {
-			s_http_tls_config = altcp_tls_create_config_client(NULL, 0);
-			if (s_http_tls_config == NULL) {
-				php_error_docref(NULL, E_WARNING, "https tls config alloc failed");
-				free(ctx.buf);
-				return false;
-			}
+		if (!rp2350_http_tls_config_ready()) {
+			php_error_docref(
+				NULL,
+				E_WARNING,
+				"https tls config alloc failed (stage=%d ret=%d)",
+				altcp_tls_debug_last_stage,
+				altcp_tls_debug_last_ret
+			);
+			free(ctx.buf);
+			return false;
 		}
 		tls_ctx.config = s_http_tls_config;
 		tls_ctx.hostname = host;

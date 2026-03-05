@@ -15,10 +15,6 @@
 #define MBEDTLS_ALLOW_PRIVATE_ACCESS
 #endif
 
-#ifndef MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES
-#define MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES
-#endif
-
 /*
  * Bare-metal RP2350 has no standard libc wall-clock implementation that
  * mbedTLS can use directly; TLS cert-time validation is out of scope for now.
