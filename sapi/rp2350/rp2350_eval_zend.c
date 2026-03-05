@@ -15,6 +15,7 @@
 #include "hardware/pwm.h"
 #include "hardware/sync.h"
 #include "lwip/ip4_addr.h"
+#include "lwip/ip6_addr.h"
 #include "lwip/ip_addr.h"
 #include "lwip/netif.h"
 #include "lwip/dns.h"
@@ -199,7 +200,8 @@ ZEND_FUNCTION(mcu_wifi_init);
 ZEND_FUNCTION(mcu_wifi_connect);
 ZEND_FUNCTION(mcu_wifi_disconnect);
 ZEND_FUNCTION(mcu_wifi_status);
-ZEND_FUNCTION(mcu_wifi_ip);
+ZEND_FUNCTION(mcu_wifi_ip4);
+ZEND_FUNCTION(mcu_wifi_ip6);
 ZEND_FUNCTION(mcu_ntp_sync);
 PHP_MINIT_FUNCTION(rp2350_mcu);
 
@@ -279,7 +281,10 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_status, 0, 0, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_wifi_ip, 0, 0, MAY_BE_STRING | MAY_BE_FALSE)
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_wifi_ip4, 0, 0, MAY_BE_STRING | MAY_BE_FALSE)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_mcu_wifi_ip6, 0, 0, MAY_BE_STRING | MAY_BE_FALSE)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_ntp_sync, 0, 0, _IS_BOOL, 0)
@@ -307,7 +312,8 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_wifi_connect, arginfo_mcu_wifi_connect)
 	ZEND_FE(mcu_wifi_disconnect, arginfo_mcu_wifi_disconnect)
 	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
-	ZEND_FE(mcu_wifi_ip, arginfo_mcu_wifi_ip)
+	ZEND_FE(mcu_wifi_ip4, arginfo_mcu_wifi_ip4)
+	ZEND_FE(mcu_wifi_ip6, arginfo_mcu_wifi_ip6)
 	ZEND_FE(mcu_ntp_sync, arginfo_mcu_ntp_sync)
 	ZEND_FE_END
 };
@@ -893,7 +899,7 @@ ZEND_FUNCTION(mcu_wifi_status)
 	RETURN_LONG(status);
 }
 
-ZEND_FUNCTION(mcu_wifi_ip)
+ZEND_FUNCTION(mcu_wifi_ip4)
 {
 	const ip4_addr_t *addr;
 	char text[IP4ADDR_STRLEN_MAX];
@@ -910,6 +916,55 @@ ZEND_FUNCTION(mcu_wifi_ip)
 		RETURN_FALSE;
 	}
 	RETURN_STRING(text);
+}
+
+ZEND_FUNCTION(mcu_wifi_ip6)
+{
+#if LWIP_IPV6
+	const ip6_addr_t *addr = NULL;
+	const ip6_addr_t *link_local = NULL;
+	char text[IP6ADDR_STRLEN_MAX];
+	int i;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	if (!rp2350_wifi_is_initialized() || netif_default == NULL) {
+		RETURN_FALSE;
+	}
+
+	for (i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
+		const ip6_addr_t *candidate;
+		u8_t state = netif_ip6_addr_state(netif_default, i);
+		if (!ip6_addr_isvalid(state)) {
+			continue;
+		}
+		candidate = netif_ip6_addr(netif_default, i);
+		if (candidate == NULL || ip6_addr_isany(candidate)) {
+			continue;
+		}
+		if (ip6_addr_islinklocal(candidate)) {
+			if (link_local == NULL) {
+				link_local = candidate;
+			}
+			continue;
+		}
+		addr = candidate;
+		break;
+	}
+
+	if (addr == NULL) {
+		addr = link_local;
+	}
+	if (addr == NULL) {
+		RETURN_FALSE;
+	}
+	if (ip6addr_ntoa_r(addr, text, sizeof(text)) == NULL) {
+		RETURN_FALSE;
+	}
+	RETURN_STRING(text);
+#else
+	ZEND_PARSE_PARAMETERS_NONE();
+	RETURN_FALSE;
+#endif
 }
 
 ZEND_FUNCTION(mcu_ntp_sync)

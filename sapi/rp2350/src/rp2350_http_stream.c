@@ -86,6 +86,7 @@ typedef struct {
 	volatile bool done;
 	volatile bool ok;
 	ip_addr_t addr;
+	char host[96];
 } rp2350_dns_query_t;
 
 typedef struct {
@@ -103,6 +104,8 @@ typedef struct {
 static void rp2350_dns_found_cb(const char *name, const ip_addr_t *ipaddr, void *arg)
 {
 	rp2350_dns_query_t *q = (rp2350_dns_query_t *)arg;
+	char ip_text[IPADDR_STRLEN_MAX];
+	const char *fam = "v4";
 	(void)name;
 	if (q == NULL) {
 		return;
@@ -110,6 +113,17 @@ static void rp2350_dns_found_cb(const char *name, const ip_addr_t *ipaddr, void 
 	if (ipaddr != NULL) {
 		q->addr = *ipaddr;
 		q->ok = true;
+#if LWIP_IPV4 && LWIP_IPV6
+		if (IP_GET_TYPE(ipaddr) == IPADDR_TYPE_V6) {
+			fam = "v6";
+		}
+#endif
+		if (ipaddr_ntoa_r(ipaddr, ip_text, sizeof(ip_text)) == NULL) {
+			snprintf(ip_text, sizeof(ip_text), "<invalid>");
+		}
+		printf("[dns] async host=%s fam=%s ip=%s\n", q->host, fam, ip_text);
+	} else {
+		printf("[dns] async host=%s result=<null>\n", q->host);
 	}
 	q->done = true;
 }
@@ -130,21 +144,44 @@ bool rp2350_dns_resolve(const char *host, uint32_t timeout_ms, ip_addr_t *out_ad
 	rp2350_dns_query_t q;
 	err_t err;
 	absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
+	char ip_text[IPADDR_STRLEN_MAX];
+	const char *fam = "v4";
 
 	memset(&q, 0, sizeof(q));
+	snprintf(q.host, sizeof(q.host), "%s", host ? host : "<null>");
+#if LWIP_IPV4 && LWIP_IPV6
+	printf("[dns] query host=%s policy=ipv6->ipv4\n", q.host);
+#else
+	printf("[dns] query host=%s policy=ipv4\n", q.host);
+#endif
 
 	cyw43_arch_lwip_begin();
+#if LWIP_IPV4 && LWIP_IPV6
+	err = dns_gethostbyname_addrtype(host, &q.addr, rp2350_dns_found_cb, &q, LWIP_DNS_ADDRTYPE_DEFAULT);
+#else
 	err = dns_gethostbyname(host, &q.addr, rp2350_dns_found_cb, &q);
+#endif
 	cyw43_arch_lwip_end();
 
 	if (err == ERR_OK) {
 		*out_addr = q.addr;
+		if (ipaddr_ntoa_r(out_addr, ip_text, sizeof(ip_text)) == NULL) {
+			snprintf(ip_text, sizeof(ip_text), "<invalid>");
+		}
+#if LWIP_IPV4 && LWIP_IPV6
+		if (IP_GET_TYPE(out_addr) == IPADDR_TYPE_V6) {
+			fam = "v6";
+		}
+#endif
+		printf("[dns] immediate host=%s fam=%s ip=%s\n", q.host, fam, ip_text);
 		return true;
 	}
 	if (err != ERR_INPROGRESS) {
+		printf("[dns] failed host=%s err=%d\n", q.host, (int)err);
 		return false;
 	}
 	if (!rp2350_lwip_wait_until(deadline, &q.done) || !q.ok) {
+		printf("[dns] timeout/fail host=%s ok=%d\n", q.host, q.ok ? 1 : 0);
 		return false;
 	}
 	*out_addr = q.addr;
@@ -1260,6 +1297,20 @@ static php_stream *rp2350_http_stream_opener(
 		free(st->net.rx);
 		efree(st);
 		RP2350_HTTP_OPEN_FAIL();
+	}
+
+	{
+		char remote_text[IPADDR_STRLEN_MAX];
+		const char *family = "v4";
+#if LWIP_IPV4 && LWIP_IPV6
+		if (IP_GET_TYPE(&remote) == IPADDR_TYPE_V6) {
+			family = "v6";
+		}
+#endif
+		if (ipaddr_ntoa_r(&remote, remote_text, sizeof(remote_text)) == NULL) {
+			snprintf(remote_text, sizeof(remote_text), "<invalid>");
+		}
+		printf("[net] connected %s %s:%u\n", family, remote_text, (unsigned)port);
 	}
 
 	if (is_https) {

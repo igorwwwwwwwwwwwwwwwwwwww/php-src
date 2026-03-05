@@ -7,6 +7,10 @@ void rp2350_sntp_set_system_time_us(uint32_t sec, uint32_t us);
 
 /* Minimal lwIP config for CYW43 station-mode bring-up on RP2350. */
 #define NO_SYS                      1
+#define LWIP_IPV4                   1
+#define LWIP_IPV6                   1
+#define LWIP_ICMP6                  1
+#define LWIP_DNS_ADDRTYPE_DEFAULT   3 /* LWIP_DNS_ADDRTYPE_IPV6_IPV4 */
 #define LWIP_DHCP                   1
 #define LWIP_RAW                    1
 #define LWIP_NETIF_HOSTNAME         1

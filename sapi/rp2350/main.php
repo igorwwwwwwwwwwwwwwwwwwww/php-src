@@ -24,7 +24,7 @@ function wifi_status_label($status) {
     return 'DOWN';
 }
 
-function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip) {
+function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6) {
     if ($mode_logo) {
         $logo = php_logo_data();
         if ($logo !== false) {
@@ -46,9 +46,28 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 168, 80, $charging ? 'CHG' : 'IDLE', 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 104, 'WIFI', 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 104, wifi_status_label($wifi_status), 2, 2);
-    if (is_string($wifi_ip) && $wifi_ip !== '') {
-        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 136, 104, $wifi_ip, 1, 1);
-    }
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 124, 'V4', 1, 1);
+    mcu_draw_text(
+        $buf,
+        MCU_EPD_WIDTH,
+        MCU_EPD_HEIGHT,
+        44,
+        124,
+        (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-',
+        1,
+        1
+    );
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 138, 'V6', 1, 1);
+    mcu_draw_text(
+        $buf,
+        MCU_EPD_WIDTH,
+        MCU_EPD_HEIGHT,
+        44,
+        138,
+        (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-',
+        1,
+        1
+    );
     print "epd:render:text\n";
     mcu_epd_render($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT);
 }
@@ -66,7 +85,8 @@ $batt_pct = mcu_battery_level_from_voltage($batt_v);
 $prev_batt_pct = $batt_pct;
 $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
 $wifi_status = MCU_WIFI_LINK_DOWN;
-$wifi_ip = null;
+$wifi_ip4 = null;
+$wifi_ip6 = null;
 
 $wifi_ssid = getenv('WIFI_SSID');
 $wifi_pass = getenv('WIFI_PASS');
@@ -78,9 +98,12 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
     print " status:";
     $wifi_status = mcu_wifi_status();
     print $wifi_status;
-    print " ip:";
-    $wifi_ip = mcu_wifi_ip();
-    print is_string($wifi_ip) ? $wifi_ip : "none";
+    $wifi_ip4 = mcu_wifi_ip4();
+    $wifi_ip6 = mcu_wifi_ip6();
+    print " ip4:";
+    print is_string($wifi_ip4) ? $wifi_ip4 : "none";
+    print " ip6:";
+    print is_string($wifi_ip6) ? $wifi_ip6 : "none";
     print "\n";
 
     if ($wifi_ok && $wifi_status === MCU_WIFI_LINK_UP) {
@@ -135,7 +158,7 @@ if (is_string($wifi_ssid) && $wifi_ssid !== '') {
 }
 
 /* Initial render exactly once at boot. */
-redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
+redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6);
 
 /* Re-baseline after boot work (wifi/ntp/http can take time and shift state). */
 $raw_vbat = mcu_battery_raw_vbat();
@@ -145,13 +168,15 @@ $usb_connected = mcu_usb_connected();
 $batt_pct = mcu_battery_level_from_voltage($batt_v);
 $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
 $wifi_status = mcu_wifi_status();
-$wifi_ip = mcu_wifi_ip();
+$wifi_ip4 = mcu_wifi_ip4();
+$wifi_ip6 = mcu_wifi_ip6();
 
 $prev_batt_pct = $batt_pct;
 $prev_usb_connected = $usb_connected;
 $prev_charging = $charging;
 $prev_wifi_status = $wifi_status;
-$prev_wifi_ip = $wifi_ip;
+$prev_wifi_ip4 = $wifi_ip4;
+$prev_wifi_ip6 = $wifi_ip6;
 $next_log_s = time() + 1;
 
 while (true) {
@@ -193,7 +218,7 @@ while (true) {
         $prev_mask = $mask;
         $led_mask = $mask;
         if ($needs_redraw) {
-            redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
+            redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6);
             $needs_redraw = false;
         }
         continue;
@@ -212,22 +237,25 @@ while (true) {
     $batt_pct = mcu_battery_level_from_voltage($batt_v);
     $charging = mcu_is_charging_estimate($batt_v, $usb_connected);
     $wifi_status = mcu_wifi_status();
-    $wifi_ip = mcu_wifi_ip();
+    $wifi_ip4 = mcu_wifi_ip4();
+    $wifi_ip6 = mcu_wifi_ip6();
     if ($batt_pct !== $prev_batt_pct
         || $usb_connected !== $prev_usb_connected
         || $charging !== $prev_charging
         || $wifi_status !== $prev_wifi_status
-        || $wifi_ip !== $prev_wifi_ip) {
+        || $wifi_ip4 !== $prev_wifi_ip4
+        || $wifi_ip6 !== $prev_wifi_ip6) {
         $needs_redraw = true;
         $prev_batt_pct = $batt_pct;
         $prev_usb_connected = $usb_connected;
         $prev_charging = $charging;
         $prev_wifi_status = $wifi_status;
-        $prev_wifi_ip = $wifi_ip;
+        $prev_wifi_ip4 = $wifi_ip4;
+        $prev_wifi_ip6 = $wifi_ip6;
     }
 
     if ($needs_redraw) {
-        redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip);
+        redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6);
         $needs_redraw = false;
     }
 
@@ -258,7 +286,9 @@ while (true) {
     print $charging ? "1" : "0";
     print " wifi:";
     print wifi_status_label($wifi_status);
-    print " ip:";
-    print is_string($wifi_ip) ? $wifi_ip : "none";
+    print " ip4:";
+    print is_string($wifi_ip4) ? $wifi_ip4 : "none";
+    print " ip6:";
+    print is_string($wifi_ip6) ? $wifi_ip6 : "none";
     print "\n";
 }
