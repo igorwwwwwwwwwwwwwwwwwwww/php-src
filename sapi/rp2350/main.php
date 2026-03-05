@@ -44,26 +44,26 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 80, (string)$batt_pct, 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 118, 80, $usb_connected ? 'USB' : 'BAT', 2, 2);
     mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 168, 80, $charging ? 'CHG' : 'IDLE', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 104, 'WIFI', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 104, wifi_status_label($wifi_status), 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 124, 'V4', 1, 1);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 96, 'WIFI', 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 74, 96, wifi_status_label($wifi_status), 2, 2);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 112, 'V4', 1, 1);
     mcu_draw_text(
         $buf,
         MCU_EPD_WIDTH,
         MCU_EPD_HEIGHT,
         44,
-        124,
+        112,
         (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-',
         1,
         1
     );
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 138, 'V6', 1, 1);
+    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 20, 122, 'V6', 1, 1);
     mcu_draw_text(
         $buf,
         MCU_EPD_WIDTH,
         MCU_EPD_HEIGHT,
         44,
-        138,
+        122,
         (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-',
         1,
         1
