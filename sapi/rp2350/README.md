@@ -54,10 +54,10 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 # Configure
 cmake -S sapi/rp2350 -B sapi/rp2350/build_badger -DPICO_BOARD=pimoroni_badger2350
 
-# Optional: wait up to 5000ms for USB serial connection before boot logs
+# Optional: set USB-serial wait window before boot logs (default: 10000ms)
 cmake -S sapi/rp2350 -B sapi/rp2350/build_badger \
   -DPICO_BOARD=pimoroni_badger2350 \
-  -DRP2350_WAIT_FOR_USB_SERIAL_MS=5000
+  -DRP2350_WAIT_FOR_USB_SERIAL_MS=10000
 
 # Build
 cmake --build sapi/rp2350/build_badger -j
@@ -118,14 +118,15 @@ Current startup smoke path:
 - `main.php` reads `getenv('WIFI_SSID')` / `getenv('WIFI_PASS')`.
 - If SSID is non-empty, it runs Wi-Fi connect on boot and logs:
   - `wifi:init`
-  - `wifi:ok:<0|1> status:<code> ip:<addr|none>`
+  - `wifi:ok:<0|1> status:<code> ip4:<addr|none> ip6:<addr|none>`
 
 Exposed PHP APIs:
 - `mcu_wifi_init(): bool`
 - `mcu_wifi_connect(string $ssid, ?string $password = null, int $timeout_ms = 15000): bool`
 - `mcu_wifi_disconnect(): bool`
 - `mcu_wifi_status(): int`
-- `mcu_wifi_ip(): string|false`
+- `mcu_wifi_ip4(): string|false`
+- `mcu_wifi_ip6(): string|false`
 - `mcu_ntp_sync(?string $server = "pool.ntp.org", int $timeout_ms = 15000): bool`
 
 Time bootstrap / TLS note:
