@@ -154,11 +154,6 @@ function mcu_battery_voltage_from_raw($raw_vbat, $raw_vref) {
     if ($vbat <= 0 || $vref <= 0) {
         return 0.0;
     }
-    if ($vbat < 200) {
-        /* Ignore startup/outlier samples that are clearly invalid. */
-        return 0.0;
-    }
-
     /* Mirror stock path with integer math first: volts = (vbat/vref) * 2.2 */
     $lhs = ($vbat * 2200);
     $half = ($vref / 2.0);
@@ -168,6 +163,20 @@ function mcu_battery_voltage_from_raw($raw_vbat, $raw_vref) {
         return 0.0;
     }
     return $mv / 1000.0;
+}
+
+function mcu_light_percent_from_raw($raw) {
+    if (!is_numeric($raw)) {
+        return 0;
+    }
+    $v = (int)($raw + 0);
+    if ($v <= 0) {
+        return 0;
+    }
+    if ($v >= 4095) {
+        return 100;
+    }
+    return (int) floor((($v * 100) + 2047) / 4095);
 }
 
 function mcu_rgb565($r, $g, $b) {

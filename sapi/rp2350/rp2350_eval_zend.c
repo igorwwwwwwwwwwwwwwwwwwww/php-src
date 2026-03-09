@@ -203,6 +203,8 @@ ZEND_FUNCTION(mcu_battery_mv);
 ZEND_FUNCTION(mcu_usb_connected);
 ZEND_FUNCTION(mcu_battery_raw_vbat);
 ZEND_FUNCTION(mcu_battery_raw_vref);
+ZEND_FUNCTION(mcu_light_raw);
+ZEND_FUNCTION(mcu_light_level);
 ZEND_FUNCTION(mcu_wifi_init);
 ZEND_FUNCTION(mcu_wifi_connect);
 ZEND_FUNCTION(mcu_wifi_disconnect);
@@ -299,6 +301,12 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_raw_vref, 0, 0, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_light_raw, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_light_level, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_init, 0, 0, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
@@ -350,6 +358,8 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_usb_connected, arginfo_mcu_usb_connected)
 	ZEND_FE(mcu_battery_raw_vbat, arginfo_mcu_battery_raw_vbat)
 	ZEND_FE(mcu_battery_raw_vref, arginfo_mcu_battery_raw_vref)
+	ZEND_FE(mcu_light_raw, arginfo_mcu_light_raw)
+	ZEND_FE(mcu_light_level, arginfo_mcu_light_level)
 	ZEND_FE(mcu_wifi_init, arginfo_mcu_wifi_init)
 	ZEND_FE(mcu_wifi_connect, arginfo_mcu_wifi_connect)
 	ZEND_FE(mcu_wifi_disconnect, arginfo_mcu_wifi_disconnect)
@@ -445,6 +455,17 @@ static void rp2350_power_sense_init(void)
 	gpio_disable_pulls(BW_VBUS_DETECT);
 
 	s_power_sense_init = true;
+}
+
+static uint rp2350_adc_input_from_gpio(uint gpio)
+{
+	if (gpio >= 26u && gpio <= 29u) {
+		return gpio - 26u;
+	}
+	if (gpio >= 40u && gpio <= 47u) {
+		return gpio - 40u;
+	}
+	return UINT_MAX;
 }
 
 static uint16_t rp2350_adc_read_avg(uint input, uint samples)
@@ -899,14 +920,20 @@ ZEND_FUNCTION(mcu_battery_voltage)
 {
 	uint16_t vbat_raw;
 	uint16_t vref_raw;
+	uint vbat_input;
+	uint vref_input;
 	double voltage;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 	rp2350_power_sense_init();
 
-	/* ADC input 0 = GPIO26 (VBAT_SENSE), input 2 = GPIO28 (SENSE_1V1). */
-	vbat_raw = rp2350_adc_read_avg(0u, 10u);
-	vref_raw = rp2350_adc_read_avg(2u, 10u);
+	vbat_input = rp2350_adc_input_from_gpio(BW_VBAT_SENSE);
+	vref_input = rp2350_adc_input_from_gpio(BW_SENSE_1V1);
+	if (vbat_input == UINT_MAX || vref_input == UINT_MAX) {
+		RETURN_DOUBLE(0.0);
+	}
+	vbat_raw = rp2350_adc_read_avg(vbat_input, 10u);
+	vref_raw = rp2350_adc_read_avg(vref_input, 10u);
 
 	/* Prefer calibrated path (matches stock), fallback to 3.3V ADC scale if VREF sense is invalid. */
 	if (vref_raw >= 16u) {
@@ -927,13 +954,20 @@ ZEND_FUNCTION(mcu_battery_mv)
 {
 	uint16_t vbat_raw;
 	uint16_t vref_raw;
+	uint vbat_input;
+	uint vref_input;
 	uint32_t mv;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 	rp2350_power_sense_init();
 
-	vbat_raw = rp2350_adc_read_avg(0u, 10u);
-	vref_raw = rp2350_adc_read_avg(2u, 10u);
+	vbat_input = rp2350_adc_input_from_gpio(BW_VBAT_SENSE);
+	vref_input = rp2350_adc_input_from_gpio(BW_SENSE_1V1);
+	if (vbat_input == UINT_MAX || vref_input == UINT_MAX) {
+		RETURN_LONG(0);
+	}
+	vbat_raw = rp2350_adc_read_avg(vbat_input, 10u);
+	vref_raw = rp2350_adc_read_avg(vref_input, 10u);
 	if (vref_raw == 0u) {
 		RETURN_LONG(0);
 	}
@@ -947,16 +981,63 @@ ZEND_FUNCTION(mcu_battery_mv)
 
 ZEND_FUNCTION(mcu_battery_raw_vbat)
 {
+	uint vbat_input;
+
 	ZEND_PARSE_PARAMETERS_NONE();
 	rp2350_power_sense_init();
-	RETURN_LONG((zend_long)rp2350_adc_read_avg(0u, 10u));
+	vbat_input = rp2350_adc_input_from_gpio(BW_VBAT_SENSE);
+	if (vbat_input == UINT_MAX) {
+		RETURN_LONG(0);
+	}
+	RETURN_LONG((zend_long)rp2350_adc_read_avg(vbat_input, 10u));
 }
 
 ZEND_FUNCTION(mcu_battery_raw_vref)
 {
+	uint vref_input;
+
 	ZEND_PARSE_PARAMETERS_NONE();
 	rp2350_power_sense_init();
-	RETURN_LONG((zend_long)rp2350_adc_read_avg(2u, 10u));
+	vref_input = rp2350_adc_input_from_gpio(BW_SENSE_1V1);
+	if (vref_input == UINT_MAX) {
+		RETURN_LONG(0);
+	}
+	RETURN_LONG((zend_long)rp2350_adc_read_avg(vref_input, 10u));
+}
+
+ZEND_FUNCTION(mcu_light_raw)
+{
+	uint light_input;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_power_sense_init();
+	adc_gpio_init(BW_LIGHT_SENSE);
+	light_input = rp2350_adc_input_from_gpio(BW_LIGHT_SENSE);
+	if (light_input == UINT_MAX) {
+		RETURN_LONG(0);
+	}
+	RETURN_LONG((zend_long)rp2350_adc_read_avg(light_input, 10u));
+}
+
+ZEND_FUNCTION(mcu_light_level)
+{
+	uint light_input;
+	uint16_t raw;
+	uint32_t pct;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_power_sense_init();
+	adc_gpio_init(BW_LIGHT_SENSE);
+	light_input = rp2350_adc_input_from_gpio(BW_LIGHT_SENSE);
+	if (light_input == UINT_MAX) {
+		RETURN_LONG(0);
+	}
+	raw = rp2350_adc_read_avg(light_input, 10u);
+	pct = ((uint32_t)raw * 100u + 2047u) / 4095u;
+	if (pct > 100u) {
+		pct = 100u;
+	}
+	RETURN_LONG((zend_long)pct);
 }
 
 ZEND_FUNCTION(mcu_wifi_init)
