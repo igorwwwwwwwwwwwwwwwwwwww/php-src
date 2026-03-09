@@ -4,6 +4,11 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 
 ## Current status
 
+## TODO
+
+- Use `LIGHT_SENSE` on Badger 2350 too (stock/reference board also has an ambient light sensor; mirror the Tufty light-sense support on the EPD/Badger path).
+
+
 - Zend engine compiles directly into firmware; executes embedded `main.php`
 - Known-good runtime path prints `tick` from `main.php` loop on UART
 - PSRAM hardware init (QPI/XIP on CS1) is working

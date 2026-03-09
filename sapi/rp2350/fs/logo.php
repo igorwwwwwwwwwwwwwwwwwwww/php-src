@@ -1,5 +1,7 @@
 <?php
 const PHP_LOGO_BMP_PATH = '/php_logo.bmp';
+const PHP_LOGO_RGB565_PATH = '/php_logo.rgb565';
+const PHP_LOGO_RGB565_META_PATH = '/php_logo.rgb565.json';
 
 function _u16le($s, $o) {
     return ord($s[$o]) | (ord($s[$o + 1]) << 8);
@@ -64,4 +66,28 @@ function php_logo_data() {
     }
 
     return array($out, $width, $height);
+}
+
+function php_logo_rgb565_data() {
+    $meta_json = file_get_contents(PHP_LOGO_RGB565_META_PATH);
+    if ($meta_json === false) {
+        return false;
+    }
+    $meta = json_decode($meta_json, true);
+    if (!is_array($meta)) {
+        return false;
+    }
+    $w = isset($meta['width']) ? (int)$meta['width'] : 0;
+    $h = isset($meta['height']) ? (int)$meta['height'] : 0;
+    if ($w <= 0 || $h <= 0) {
+        return false;
+    }
+    $buf = file_get_contents(PHP_LOGO_RGB565_PATH);
+    if ($buf === false) {
+        return false;
+    }
+    if (strlen($buf) < ($w * $h * 2)) {
+        return false;
+    }
+    return array($buf, $w, $h);
 }
