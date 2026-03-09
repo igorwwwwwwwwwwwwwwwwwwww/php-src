@@ -54,6 +54,7 @@ function wifi_status_label($status) {
 }
 
 function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw = 0, $backlight_pct = 100) {
+    static $tft_status_base = null;
     $render_t0 = microtime(true);
     $has_epd = function_exists('mcu_epd_render');
     $has_tft = function_exists('mcu_tft_render');
@@ -146,6 +147,7 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
     }
 
     if ($has_tft) {
+        $t0 = microtime(true);
         $bg = mcu_rgb565(7, 12, 20);
         $panel = mcu_rgb565(18, 28, 40);
         $accent = mcu_rgb565(0, 180, 220);
@@ -154,35 +156,61 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
         $muted = mcu_rgb565(150, 168, 182);
         $ok = mcu_rgb565(80, 220, 120);
         $warn = mcu_rgb565(255, 210, 80);
-        $buf = mcu_tft_fb_create(MCU_TFT_WIDTH, MCU_TFT_HEIGHT, $bg);
+        $t_colors = microtime(true);
+        if ($tft_status_base === null) {
+            $tft_status_base = mcu_tft_fb_create(MCU_TFT_WIDTH, MCU_TFT_HEIGHT, $bg);
+            mcu_tft_fill_rect($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, MCU_TFT_HEIGHT - 16, $panel);
+            mcu_tft_fill_rect($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, 6, $accent);
+            mcu_tft_fill_rect($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 54, MCU_TFT_WIDTH - 16, 2, $accent2);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 18, 20, 'PHP RP2350', $fg, null, 3, 2);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 64, 'PHP ' . PHP_VERSION, $muted, null, 2, 2);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 96, 'BAT', $accent2, null, 2, 2);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 126, 'WIFI', $accent, null, 2, 2);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 152, 'LIGHT', $accent2, null, 1, 1);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 130, 152, 'BL', $accent, null, 1, 1);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 170, 'UPDATED', $muted, null, 1, 1);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 188, 'V4', $muted, null, 1, 1);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 204, 'V6', $muted, null, 1, 1);
+            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 220, 'UP/DOWN BL  BTN C LOGO', $accent2, null, 1, 1);
+        }
+        $t_fb = microtime(true);
+        $buf = $tft_status_base;
+        $t_bg = microtime(true);
 
-        mcu_tft_fill_rect($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, MCU_TFT_HEIGHT - 16, $panel);
-        mcu_tft_fill_rect($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, 6, $accent);
-        mcu_tft_fill_rect($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 54, MCU_TFT_WIDTH - 16, 2, $accent2);
-
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 18, 20, 'PHP RP2350', $fg, null, 3, 2);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 64, 'PHP ' . PHP_VERSION, $muted, null, 2, 2);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 96, 'BAT', $accent2, null, 2, 2);
+        $t_text_1 = microtime(true);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 92, 96, (string)$batt_pct . '%', $fg, null, 2, 2);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 180, 96, $usb_connected ? 'USB' : 'BAT', $usb_connected ? $ok : $muted, null, 2, 2);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 240, 96, $charging ? 'CHG' : 'IDLE', $charging ? $warn : $muted, null, 2, 2);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 126, 'WIFI', $accent, null, 2, 2);
+        $t_text_2 = microtime(true);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 92, 126, wifi_status_label($wifi_status), $wifi_status === MCU_WIFI_LINK_UP ? $ok : $warn, null, 2, 2);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 152, 'LIGHT', $accent2, null, 1, 1);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 64, 152, (string)$light_raw, $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 130, 152, 'BL', $accent, null, 1, 1);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 150, 152, (string)$backlight_pct . '%', $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 170, 'UPDATED', $muted, null, 1, 1);
+        $t_text_3 = microtime(true);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 84, 170, date('Y-m-d\\TH:i:s'), $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 188, 'V4', $muted, null, 1, 1);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 44, 188, (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-', $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 204, 'V6', $muted, null, 1, 1);
         mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 44, 204, (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-', $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 220, 'UP/DOWN BL  BTN C LOGO', $accent2, null, 1, 1);
+        $t_text_4 = microtime(true);
         print "tft:render:text\n";
         mcu_tft_render($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT);
+        $t_blit = microtime(true);
         print "render_ms:";
-        print (int) ((microtime(true) - $render_t0) * 1000.0);
+        print (int) (($t_blit - $render_t0) * 1000.0);
+        print " colors_ms:";
+        print (int) (($t_colors - $t0) * 1000.0);
+        print " fb_ms:";
+        print (int) (($t_fb - $t_colors) * 1000.0);
+        print " bg_ms:";
+        print (int) (($t_bg - $t_fb) * 1000.0);
+        print " text1_ms:";
+        print (int) (($t_text_1 - $t_bg) * 1000.0);
+        print " text2_ms:";
+        print (int) (($t_text_2 - $t_text_1) * 1000.0);
+        print " text3_ms:";
+        print (int) (($t_text_3 - $t_text_2) * 1000.0);
+        print " text4_ms:";
+        print (int) (($t_text_4 - $t_text_3) * 1000.0);
+        print " blit_ms:";
+        print (int) (($t_blit - $t_text_4) * 1000.0);
         print "\n";
     }
 }
