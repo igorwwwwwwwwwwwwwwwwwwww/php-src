@@ -10,6 +10,7 @@
 #include "pico/stdlib.h"
 #include "pico/time.h"
 #include "pico/sem.h"
+#include "pico/rand.h"
 #include "pico/cyw43_arch.h"
 #include "hardware/adc.h"
 #include "hardware/pwm.h"
@@ -1439,29 +1440,22 @@ static zend_string *rp2350_zend_resolve_path(zend_string *filename)
 	return zend_string_init(path, strlen(path), 0);
 }
 
-static uint32_t rp2350_prng_state = 0x12345678u;
-
-static uint32_t rp2350_prng_u32(void)
-{
-	rp2350_prng_state = (rp2350_prng_state * 1664525u) + 1013904223u;
-	return rp2350_prng_state;
-}
-
 static zend_result rp2350_zend_random_bytes(void *bytes, size_t size, char *errstr, size_t errstr_size)
 {
 	uint8_t *out = (uint8_t *) bytes;
-	size_t i;
+	size_t off = 0;
 
 	(void) errstr;
 	(void) errstr_size;
 
-	for (i = 0; i < size; i++) {
-		if ((i & 3u) == 0) {
-			uint32_t r = rp2350_prng_u32();
-			out[i] = (uint8_t) (r & 0xffu);
-		} else {
-			out[i] = (uint8_t) ((rp2350_prng_state >> ((i & 3u) * 8u)) & 0xffu);
+	while (off < size) {
+		uint64_t r = get_rand_64();
+		size_t n = size - off;
+		if (n > sizeof(r)) {
+			n = sizeof(r);
 		}
+		memcpy(out + off, &r, n);
+		off += n;
 	}
 	return SUCCESS;
 }
