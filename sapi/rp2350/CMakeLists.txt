@@ -107,6 +107,19 @@ list(REMOVE_ITEM RP2350_STANDARD_SOURCES
   "${PHP_SRC_ROOT}/ext/standard/dns.c"
 )
 file(GLOB RP2350_RANDOM_SOURCES "${PHP_SRC_ROOT}/ext/random/*.c")
+file(GLOB RP2350_HASH_SOURCES "${PHP_SRC_ROOT}/ext/hash/*.c")
+list(REMOVE_ITEM RP2350_HASH_SOURCES
+  "${PHP_SRC_ROOT}/ext/hash/hash_sha_ni.c"
+  "${PHP_SRC_ROOT}/ext/hash/hash_sha_sse2.c"
+)
+set(RP2350_HASH_EXTRA_SOURCES
+  ${PHP_SRC_ROOT}/ext/hash/murmur/PMurHash.c
+  ${PHP_SRC_ROOT}/ext/hash/murmur/PMurHash128.c
+)
+set_source_files_properties(${PHP_SRC_ROOT}/ext/hash/hash_sha3.c PROPERTIES
+  COMPILE_DEFINITIONS "HAVE_SLOW_HASH3=1"
+  COMPILE_OPTIONS "-Wno-error=incompatible-pointer-types"
+)
 set(RP2350_JSON_SOURCES
   ${PHP_SRC_ROOT}/ext/json/json.c
   ${PHP_SRC_ROOT}/ext/json/json_encoder.c
@@ -277,6 +290,8 @@ add_executable(php_mcu_firmware
   ${RP2350_STANDARD_SOURCES}
   ${PHP_SRC_ROOT}/ext/standard/libavifinfo/avifinfo.c
   ${RP2350_RANDOM_SOURCES}
+  ${RP2350_HASH_SOURCES}
+  ${RP2350_HASH_EXTRA_SOURCES}
   ${RP2350_JSON_SOURCES}
   ${RP2350_PCRE_SOURCES}
   ${RP2350_URI_SOURCES}

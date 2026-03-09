@@ -22,6 +22,15 @@ function run_json_smoke() {
     }
 }
 
+function run_hash_smoke() {
+    $h = hash('sha256', 'rp2350');
+    if ($h === '4edf24a8528802ecb76196343bd5e677dd5dd56494cc8fbafbd1025791c22fc2') {
+        print "hash:ok\n";
+    } else {
+        print "hash:fail\n";
+    }
+}
+
 function wifi_status_label($status) {
     if ($status === MCU_WIFI_LINK_UP) {
         return 'UP';
@@ -113,6 +122,7 @@ $wifi_ip4 = null;
 $wifi_ip6 = null;
 
 run_pcre_smoke();
+run_hash_smoke();
 run_json_smoke();
 
 $wifi_ssid = getenv('WIFI_SSID');
