@@ -308,71 +308,15 @@ redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wif
 
 $wifi_ssid = getenv('WIFI_SSID');
 $wifi_pass = getenv('WIFI_PASS');
+$wifi_connecting = false;
+$wifi_bootstrap_done = false;
+$wifi_last_status = $wifi_status;
 if (is_string($wifi_ssid) && $wifi_ssid !== '') {
     print "wifi:init\n";
-    $wifi_ok = mcu_wifi_connect($wifi_ssid, is_string($wifi_pass) ? $wifi_pass : null, 15000);
-    print "wifi:ok:";
-    print $wifi_ok ? "1" : "0";
-    print " status:";
-    $wifi_status = mcu_wifi_status();
-    print $wifi_status;
-    $wifi_ip4 = mcu_wifi_ip4();
-    $wifi_ip6 = mcu_wifi_ip6();
-    print " ip4:";
-    print is_string($wifi_ip4) ? $wifi_ip4 : "none";
-    print " ip6:";
-    print is_string($wifi_ip6) ? $wifi_ip6 : "none";
+    $wifi_connecting = mcu_wifi_connect_start($wifi_ssid, is_string($wifi_pass) ? $wifi_pass : null);
+    print "wifi:start:";
+    print $wifi_connecting ? "1" : "0";
     print "\n";
-
-    if ($wifi_ok && $wifi_status === MCU_WIFI_LINK_UP) {
-        $ntp_ok = mcu_ntp_sync('pool.ntp.org', 10000);
-        print "ntp:ok:";
-        print $ntp_ok ? "1" : "0";
-        print " now:";
-        print time();
-        print "\n";
-
-        $http = file_get_contents('http://example.com/');
-        if ($http === false) {
-            print "http:wrapper:fail\n";
-        } else {
-            print "http:wrapper:ok len:";
-            print strlen($http);
-            print " head:";
-            print substr($http, 0, 24);
-            print "\n";
-        }
-
-        $https = file_get_contents('https://example.com/');
-        if ($https === false) {
-            print "https:wrapper:fail\n";
-        } else {
-            print "https:wrapper:ok len:";
-            print strlen($https);
-            print " head:";
-            print substr($https, 0, 24);
-            print "\n";
-        }
-
-        $ctx = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'timeout' => 6.0,
-                'header' => "X-RP2350-Context: 1\r\n",
-            ],
-        ]);
-        $https_ctx = file_get_contents('https://example.com/', false, $ctx);
-        if ($https_ctx === false) {
-            print "https:ctx:fail\n";
-        } else {
-            print "https:ctx:ok len:";
-            print strlen($https_ctx);
-            print " head:";
-            print substr($https_ctx, 0, 24);
-            print "\n";
-        }
-
-    }
 }
 
 /* Re-baseline after boot work (wifi/ntp/http can take time and shift state). */
@@ -422,6 +366,85 @@ while (true) {
         mcu_led_level(MCU_LED_1, $gamma);
     } else {
         mcu_led_set(MCU_LED_1, (($led_mask & (1 << MCU_BTN_B)) !== 0));
+    }
+
+    if ($wifi_connecting && !$wifi_bootstrap_done) {
+        $wifi_status = mcu_wifi_connect_poll();
+        if ($wifi_status !== $wifi_last_status) {
+            $wifi_last_status = $wifi_status;
+            $needs_redraw = true;
+            print "wifi:status:";
+            print $wifi_status;
+            print "\n";
+        }
+        if ($wifi_status === MCU_WIFI_LINK_UP) {
+            $wifi_connecting = false;
+            $wifi_bootstrap_done = true;
+            $wifi_ip4 = mcu_wifi_ip4();
+            $wifi_ip6 = mcu_wifi_ip6();
+            print "wifi:ok:1 status:";
+            print $wifi_status;
+            print " ip4:";
+            print is_string($wifi_ip4) ? $wifi_ip4 : "none";
+            print " ip6:";
+            print is_string($wifi_ip6) ? $wifi_ip6 : "none";
+            print "\n";
+
+            $ntp_ok = mcu_ntp_sync('pool.ntp.org', 10000);
+            print "ntp:ok:";
+            print $ntp_ok ? "1" : "0";
+            print " now:";
+            print time();
+            print "\n";
+
+            $http = file_get_contents('http://example.com/');
+            if ($http === false) {
+                print "http:wrapper:fail\n";
+            } else {
+                print "http:wrapper:ok len:";
+                print strlen($http);
+                print " head:";
+                print substr($http, 0, 24);
+                print "\n";
+            }
+
+            $https = file_get_contents('https://example.com/');
+            if ($https === false) {
+                print "https:wrapper:fail\n";
+            } else {
+                print "https:wrapper:ok len:";
+                print strlen($https);
+                print " head:";
+                print substr($https, 0, 24);
+                print "\n";
+            }
+
+            $ctx = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => 6.0,
+                    'header' => "X-RP2350-Context: 1\r\n",
+                ],
+            ]);
+            $https_ctx = file_get_contents('https://example.com/', false, $ctx);
+            if ($https_ctx === false) {
+                print "https:ctx:fail\n";
+            } else {
+                print "https:ctx:ok len:";
+                print strlen($https_ctx);
+                print " head:";
+                print substr($https_ctx, 0, 24);
+                print "\n";
+            }
+            $needs_redraw = true;
+        } elseif ($wifi_status === MCU_WIFI_LINK_FAIL || $wifi_status === MCU_WIFI_LINK_NONET || $wifi_status === MCU_WIFI_LINK_BADAUTH) {
+            $wifi_connecting = false;
+            $wifi_bootstrap_done = true;
+            print "wifi:ok:0 status:";
+            print $wifi_status;
+            print "\n";
+            $needs_redraw = true;
+        }
     }
 
     $mask = mcu_button_wait($remaining_ms);

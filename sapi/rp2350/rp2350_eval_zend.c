@@ -212,6 +212,8 @@ ZEND_FUNCTION(mcu_light_raw);
 ZEND_FUNCTION(mcu_light_level);
 ZEND_FUNCTION(mcu_wifi_init);
 ZEND_FUNCTION(mcu_wifi_connect);
+ZEND_FUNCTION(mcu_wifi_connect_start);
+ZEND_FUNCTION(mcu_wifi_connect_poll);
 ZEND_FUNCTION(mcu_wifi_disconnect);
 ZEND_FUNCTION(mcu_wifi_status);
 ZEND_FUNCTION(mcu_wifi_ip4);
@@ -353,6 +355,14 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_connect, 0, 1, _IS_BOOL
 	ZEND_ARG_TYPE_INFO(0, timeout_ms, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_connect_start, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, ssid, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, password, IS_STRING, 1)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_connect_poll, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_disconnect, 0, 0, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
@@ -404,6 +414,8 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_light_level, arginfo_mcu_light_level)
 	ZEND_FE(mcu_wifi_init, arginfo_mcu_wifi_init)
 	ZEND_FE(mcu_wifi_connect, arginfo_mcu_wifi_connect)
+	ZEND_FE(mcu_wifi_connect_start, arginfo_mcu_wifi_connect_start)
+	ZEND_FE(mcu_wifi_connect_poll, arginfo_mcu_wifi_connect_poll)
 	ZEND_FE(mcu_wifi_disconnect, arginfo_mcu_wifi_disconnect)
 	ZEND_FE(mcu_wifi_status, arginfo_mcu_wifi_status)
 	ZEND_FE(mcu_wifi_ip4, arginfo_mcu_wifi_ip4)
@@ -1201,6 +1213,50 @@ ZEND_FUNCTION(mcu_wifi_connect)
 		(uint32_t)timeout_ms
 	);
 	RETURN_BOOL(rc == 0);
+}
+
+ZEND_FUNCTION(mcu_wifi_connect_start)
+{
+	char *ssid = NULL;
+	size_t ssid_len = 0;
+	char *password = NULL;
+	size_t password_len = 0;
+	uint32_t auth = CYW43_AUTH_OPEN;
+	int rc;
+
+	ZEND_PARSE_PARAMETERS_START(1, 2)
+		Z_PARAM_STRING(ssid, ssid_len)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_STRING_OR_NULL(password, password_len)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (ssid_len == 0) {
+		zend_argument_value_error(1, "must not be empty");
+		RETURN_THROWS();
+	}
+	if (!rp2350_wifi_init_once()) {
+		RETURN_FALSE;
+	}
+	if (password != NULL && password_len > 0) {
+		auth = CYW43_AUTH_WPA2_AES_PSK;
+	}
+
+	cyw43_arch_lwip_begin();
+	rc = cyw43_wifi_join(&cyw43_state, ssid_len, (const uint8_t *)ssid, password_len, (const uint8_t *)password, auth, NULL, 0);
+	cyw43_arch_lwip_end();
+	RETURN_BOOL(rc == 0);
+}
+
+ZEND_FUNCTION(mcu_wifi_connect_poll)
+{
+	int status;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	if (!rp2350_wifi_is_initialized()) {
+		RETURN_LONG(CYW43_LINK_DOWN);
+	}
+	status = cyw43_tcpip_link_status(&cyw43_state, CYW43_ITF_STA);
+	RETURN_LONG(status);
 }
 
 ZEND_FUNCTION(mcu_wifi_disconnect)
