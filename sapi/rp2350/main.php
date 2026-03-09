@@ -53,8 +53,50 @@ function wifi_status_label($status) {
     return 'DOWN';
 }
 
+function tft_theme() {
+    static $theme = null;
+    if ($theme !== null) {
+        return $theme;
+    }
+    $theme = [
+        'bg' => mcu_rgb565(7, 12, 20),
+        'panel' => mcu_rgb565(18, 28, 40),
+        'accent' => mcu_rgb565(0, 180, 220),
+        'accent2' => mcu_rgb565(255, 180, 0),
+        'fg' => mcu_rgb565(245, 248, 250),
+        'muted' => mcu_rgb565(150, 168, 182),
+        'ok' => mcu_rgb565(80, 220, 120),
+        'warn' => mcu_rgb565(255, 210, 80),
+        'clear' => mcu_rgb565(18, 28, 40),
+    ];
+    return $theme;
+}
+
+function tft_status_base_cfb() {
+    static $built = false;
+    if ($built) {
+        return;
+    }
+    $c = tft_theme();
+    mcu_tft_fb_clear($c['bg']);
+    mcu_tft_fb_fill_rect(8, 8, MCU_TFT_WIDTH - 16, MCU_TFT_HEIGHT - 16, $c['panel']);
+    mcu_tft_fb_fill_rect(8, 8, MCU_TFT_WIDTH - 16, 6, $c['accent']);
+    mcu_tft_fb_fill_rect(8, 54, MCU_TFT_WIDTH - 16, 2, $c['accent2']);
+    mcu_tft_fb_draw_text(18, 20, 'PHP RP2350', $c['fg'], 3, 2);
+    mcu_tft_fb_draw_text(20, 64, 'PHP ' . PHP_VERSION, $c['muted'], 2, 2);
+    mcu_tft_fb_draw_text(20, 96, 'BAT', $c['accent2'], 2, 2);
+    mcu_tft_fb_draw_text(20, 126, 'WIFI', $c['accent'], 2, 2);
+    mcu_tft_fb_draw_text(20, 152, 'LIGHT', $c['accent2'], 1, 1);
+    mcu_tft_fb_draw_text(130, 152, 'BL', $c['accent'], 1, 1);
+    mcu_tft_fb_draw_text(20, 170, 'UPDATED', $c['muted'], 1, 1);
+    mcu_tft_fb_draw_text(20, 188, 'V4', $c['muted'], 1, 1);
+    mcu_tft_fb_draw_text(20, 204, 'V6', $c['muted'], 1, 1);
+    mcu_tft_fb_draw_text(20, 220, 'UP/DOWN BL  BTN C LOGO', $c['accent2'], 1, 1);
+    $built = true;
+}
+
 function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw = 0, $backlight_pct = 100) {
-    static $tft_status_base = null;
+    static $tft_prev = null;
     $render_t0 = microtime(true);
     $has_epd = function_exists('mcu_epd_render');
     $has_tft = function_exists('mcu_tft_render');
@@ -148,69 +190,73 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
 
     if ($has_tft) {
         $t0 = microtime(true);
-        $bg = mcu_rgb565(7, 12, 20);
-        $panel = mcu_rgb565(18, 28, 40);
-        $accent = mcu_rgb565(0, 180, 220);
-        $accent2 = mcu_rgb565(255, 180, 0);
-        $fg = mcu_rgb565(245, 248, 250);
-        $muted = mcu_rgb565(150, 168, 182);
-        $ok = mcu_rgb565(80, 220, 120);
-        $warn = mcu_rgb565(255, 210, 80);
-        $t_colors = microtime(true);
-        if ($tft_status_base === null) {
-            $tft_status_base = mcu_tft_fb_create(MCU_TFT_WIDTH, MCU_TFT_HEIGHT, $bg);
-            mcu_tft_fill_rect($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, MCU_TFT_HEIGHT - 16, $panel);
-            mcu_tft_fill_rect($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, 6, $accent);
-            mcu_tft_fill_rect($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 54, MCU_TFT_WIDTH - 16, 2, $accent2);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 18, 20, 'PHP RP2350', $fg, null, 3, 2);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 64, 'PHP ' . PHP_VERSION, $muted, null, 2, 2);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 96, 'BAT', $accent2, null, 2, 2);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 126, 'WIFI', $accent, null, 2, 2);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 152, 'LIGHT', $accent2, null, 1, 1);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 130, 152, 'BL', $accent, null, 1, 1);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 170, 'UPDATED', $muted, null, 1, 1);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 188, 'V4', $muted, null, 1, 1);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 204, 'V6', $muted, null, 1, 1);
-            mcu_tft_draw_text($tft_status_base, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 220, 'UP/DOWN BL  BTN C LOGO', $accent2, null, 1, 1);
-        }
-        $t_fb = microtime(true);
-        $buf = $tft_status_base;
-        $t_bg = microtime(true);
+        $c = tft_theme();
+        tft_status_base_cfb();
+        $t_base = microtime(true);
 
-        $t_text_1 = microtime(true);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 92, 96, (string)$batt_pct . '%', $fg, null, 2, 2);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 180, 96, $usb_connected ? 'USB' : 'BAT', $usb_connected ? $ok : $muted, null, 2, 2);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 240, 96, $charging ? 'CHG' : 'IDLE', $charging ? $warn : $muted, null, 2, 2);
-        $t_text_2 = microtime(true);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 92, 126, wifi_status_label($wifi_status), $wifi_status === MCU_WIFI_LINK_UP ? $ok : $warn, null, 2, 2);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 64, 152, (string)$light_raw, $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 150, 152, (string)$backlight_pct . '%', $fg, null, 1, 1);
-        $t_text_3 = microtime(true);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 84, 170, date('Y-m-d\\TH:i:s'), $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 44, 188, (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-', $fg, null, 1, 1);
-        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 44, 204, (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-', $fg, null, 1, 1);
-        $t_text_4 = microtime(true);
+        $curr = [
+            'batt_pct' => (string)$batt_pct . '%',
+            'usb' => $usb_connected ? 'USB' : 'BAT',
+            'charging' => $charging ? 'CHG' : 'IDLE',
+            'wifi' => wifi_status_label($wifi_status),
+            'light' => (string)$light_raw,
+            'bl' => (string)$backlight_pct . '%',
+            'updated' => date('Y-m-d\\TH:i:s'),
+            'ip4' => (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-',
+            'ip6' => (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-',
+        ];
+        $force_all = ($tft_prev === null);
+
+        if ($force_all || $tft_prev['batt_pct'] !== $curr['batt_pct']) {
+            mcu_tft_fb_fill_rect(92, 96, 68, 24, $c['panel']);
+            mcu_tft_fb_draw_text(92, 96, $curr['batt_pct'], $c['fg'], 2, 2);
+        }
+        if ($force_all || $tft_prev['usb'] !== $curr['usb']) {
+            mcu_tft_fb_fill_rect(180, 96, 52, 24, $c['panel']);
+            mcu_tft_fb_draw_text(180, 96, $curr['usb'], $usb_connected ? $c['ok'] : $c['muted'], 2, 2);
+        }
+        if ($force_all || $tft_prev['charging'] !== $curr['charging']) {
+            mcu_tft_fb_fill_rect(240, 96, 56, 24, $c['panel']);
+            mcu_tft_fb_draw_text(240, 96, $curr['charging'], $charging ? $c['warn'] : $c['muted'], 2, 2);
+        }
+        if ($force_all || $tft_prev['wifi'] !== $curr['wifi']) {
+            mcu_tft_fb_fill_rect(92, 126, 80, 24, $c['panel']);
+            mcu_tft_fb_draw_text(92, 126, $curr['wifi'], $wifi_status === MCU_WIFI_LINK_UP ? $c['ok'] : $c['warn'], 2, 2);
+        }
+        if ($force_all || $tft_prev['light'] !== $curr['light']) {
+            mcu_tft_fb_fill_rect(64, 152, 48, 12, $c['panel']);
+            mcu_tft_fb_draw_text(64, 152, $curr['light'], $c['fg'], 1, 1);
+        }
+        if ($force_all || $tft_prev['bl'] !== $curr['bl']) {
+            mcu_tft_fb_fill_rect(150, 152, 40, 12, $c['panel']);
+            mcu_tft_fb_draw_text(150, 152, $curr['bl'], $c['fg'], 1, 1);
+        }
+        if ($force_all || $tft_prev['updated'] !== $curr['updated']) {
+            mcu_tft_fb_fill_rect(84, 170, 150, 12, $c['panel']);
+            mcu_tft_fb_draw_text(84, 170, $curr['updated'], $c['fg'], 1, 1);
+        }
+        if ($force_all || $tft_prev['ip4'] !== $curr['ip4']) {
+            mcu_tft_fb_fill_rect(44, 188, MCU_TFT_WIDTH - 52, 12, $c['panel']);
+            mcu_tft_fb_draw_text(44, 188, $curr['ip4'], $c['fg'], 1, 1);
+        }
+        if ($force_all || $tft_prev['ip6'] !== $curr['ip6']) {
+            mcu_tft_fb_fill_rect(44, 204, MCU_TFT_WIDTH - 52, 12, $c['panel']);
+            mcu_tft_fb_draw_text(44, 204, $curr['ip6'], $c['fg'], 1, 1);
+        }
+        $t_text = microtime(true);
+        $tft_prev = $curr;
+
         print "tft:render:text\n";
-        mcu_tft_render($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT);
+        mcu_tft_fb_render();
         $t_blit = microtime(true);
         print "render_ms:";
         print (int) (($t_blit - $render_t0) * 1000.0);
-        print " colors_ms:";
-        print (int) (($t_colors - $t0) * 1000.0);
-        print " fb_ms:";
-        print (int) (($t_fb - $t_colors) * 1000.0);
-        print " bg_ms:";
-        print (int) (($t_bg - $t_fb) * 1000.0);
-        print " text1_ms:";
-        print (int) (($t_text_1 - $t_bg) * 1000.0);
-        print " text2_ms:";
-        print (int) (($t_text_2 - $t_text_1) * 1000.0);
-        print " text3_ms:";
-        print (int) (($t_text_3 - $t_text_2) * 1000.0);
-        print " text4_ms:";
-        print (int) (($t_text_4 - $t_text_3) * 1000.0);
+        print " base_ms:";
+        print (int) (($t_base - $t0) * 1000.0);
+        print " text_ms:";
+        print (int) (($t_text - $t_base) * 1000.0);
         print " blit_ms:";
-        print (int) (($t_blit - $t_text_4) * 1000.0);
+        print (int) (($t_blit - $t_text) * 1000.0);
         print "\n";
     }
 }
@@ -333,7 +379,6 @@ $prev_charging = $charging;
 $prev_wifi_status = $wifi_status;
 $prev_wifi_ip4 = $wifi_ip4;
 $prev_wifi_ip6 = $wifi_ip6;
-$prev_light_raw = $light_raw;
 $next_log_s = time() + 1;
 
 while (true) {
@@ -421,7 +466,7 @@ while (true) {
     $wifi_ip4 = mcu_wifi_ip4();
     $wifi_ip6 = mcu_wifi_ip6();
     $light_raw = function_exists('mcu_light_raw') ? mcu_light_raw() : 0;
-        if ($batt_pct !== $prev_batt_pct
+    if ($batt_pct !== $prev_batt_pct
         || $usb_connected !== $prev_usb_connected
         || $charging !== $prev_charging
         || $wifi_status !== $prev_wifi_status
@@ -434,7 +479,6 @@ while (true) {
         $prev_wifi_status = $wifi_status;
         $prev_wifi_ip4 = $wifi_ip4;
         $prev_wifi_ip6 = $wifi_ip6;
-        $prev_light_raw = $light_raw;
     }
 
     if ($needs_redraw) {

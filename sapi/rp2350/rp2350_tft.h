@@ -14,6 +14,13 @@ bool rp2350_tft_clear(uint16_t rgb565);
 bool rp2350_tft_set_pixel(int x, int y, uint16_t rgb565);
 bool rp2350_tft_backlight(uint16_t level);
 bool rp2350_tft_render_rgb565_bytes(const uint8_t *data, size_t data_len, int width, int height, int x, int y);
+bool rp2350_tft_fb_clear(uint16_t rgb565);
+bool rp2350_tft_fb_fill_rect(int x, int y, int width, int height, uint16_t rgb565);
+bool rp2350_tft_fb_set_pixel(int x, int y, uint16_t rgb565);
+bool rp2350_tft_fb_draw_text(int x, int y, const char *text, size_t text_len, uint16_t fg, int scale, int spacing);
+bool rp2350_tft_fb_render(int x, int y);
+uint8_t *rp2350_tft_fb_data(void);
+size_t rp2350_tft_fb_len(void);
 int rp2350_tft_width(void);
 int rp2350_tft_height(void);
 

@@ -198,6 +198,11 @@ ZEND_FUNCTION(mcu_tft_clear);
 ZEND_FUNCTION(mcu_tft_set_pixel);
 ZEND_FUNCTION(mcu_tft_backlight);
 ZEND_FUNCTION(mcu_tft_render);
+ZEND_FUNCTION(mcu_tft_fb_clear);
+ZEND_FUNCTION(mcu_tft_fb_fill_rect);
+ZEND_FUNCTION(mcu_tft_fb_set_pixel);
+ZEND_FUNCTION(mcu_tft_fb_draw_text);
+ZEND_FUNCTION(mcu_tft_fb_render);
 ZEND_FUNCTION(mcu_battery_voltage);
 ZEND_FUNCTION(mcu_battery_mv);
 ZEND_FUNCTION(mcu_usb_connected);
@@ -286,6 +291,38 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_render, 0, 3, _IS_BOOL, 
 	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 1)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_fb_clear, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, rgb565, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_fb_fill_rect, 0, 5, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, width, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, height, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, rgb565, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_fb_set_pixel, 0, 3, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, rgb565, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_fb_draw_text, 0, 6, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, text, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, fg, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, scale, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, spacing, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_fb_render, 0, 0, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 1)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 1)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_voltage, 0, 0, IS_DOUBLE, 0)
 ZEND_END_ARG_INFO()
 
@@ -352,6 +389,11 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_tft_set_pixel, arginfo_mcu_tft_set_pixel)
 	ZEND_FE(mcu_tft_backlight, arginfo_mcu_tft_backlight)
 	ZEND_FE(mcu_tft_render, arginfo_mcu_tft_render)
+	ZEND_FE(mcu_tft_fb_clear, arginfo_mcu_tft_fb_clear)
+	ZEND_FE(mcu_tft_fb_fill_rect, arginfo_mcu_tft_fb_fill_rect)
+	ZEND_FE(mcu_tft_fb_set_pixel, arginfo_mcu_tft_fb_set_pixel)
+	ZEND_FE(mcu_tft_fb_draw_text, arginfo_mcu_tft_fb_draw_text)
+	ZEND_FE(mcu_tft_fb_render, arginfo_mcu_tft_fb_render)
 #endif
 	ZEND_FE(mcu_battery_voltage, arginfo_mcu_battery_voltage)
 	ZEND_FE(mcu_battery_mv, arginfo_mcu_battery_mv)
@@ -906,6 +948,87 @@ ZEND_FUNCTION(mcu_tft_render)
 	}
 
 	RETURN_BOOL(rp2350_tft_render_rgb565_bytes((const uint8_t *)bytes, bytes_len, (int)width, (int)height, (int)x, (int)y));
+}
+
+ZEND_FUNCTION(mcu_tft_fb_clear)
+{
+	zend_long rgb565 = 0;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(rgb565)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_fb_clear((uint16_t)rgb565));
+}
+
+ZEND_FUNCTION(mcu_tft_fb_fill_rect)
+{
+	zend_long x = 0;
+	zend_long y = 0;
+	zend_long width = 0;
+	zend_long height = 0;
+	zend_long rgb565 = 0;
+
+	ZEND_PARSE_PARAMETERS_START(5, 5)
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+		Z_PARAM_LONG(width)
+		Z_PARAM_LONG(height)
+		Z_PARAM_LONG(rgb565)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_fb_fill_rect((int)x, (int)y, (int)width, (int)height, (uint16_t)rgb565));
+}
+
+ZEND_FUNCTION(mcu_tft_fb_set_pixel)
+{
+	zend_long x = 0;
+	zend_long y = 0;
+	zend_long rgb565 = 0;
+
+	ZEND_PARSE_PARAMETERS_START(3, 3)
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+		Z_PARAM_LONG(rgb565)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_fb_set_pixel((int)x, (int)y, (uint16_t)rgb565));
+}
+
+ZEND_FUNCTION(mcu_tft_fb_draw_text)
+{
+	zend_long x = 0;
+	zend_long y = 0;
+	char *text = NULL;
+	size_t text_len = 0;
+	zend_long fg = 0;
+	zend_long scale = 1;
+	zend_long spacing = 1;
+
+	ZEND_PARSE_PARAMETERS_START(6, 6)
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+		Z_PARAM_STRING(text, text_len)
+		Z_PARAM_LONG(fg)
+		Z_PARAM_LONG(scale)
+		Z_PARAM_LONG(spacing)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_fb_draw_text((int)x, (int)y, text, text_len, (uint16_t)fg, (int)scale, (int)spacing));
+}
+
+ZEND_FUNCTION(mcu_tft_fb_render)
+{
+	zend_long x = 0;
+	zend_long y = 0;
+
+	ZEND_PARSE_PARAMETERS_START(0, 2)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_fb_render((int)x, (int)y));
 }
 #endif
 
