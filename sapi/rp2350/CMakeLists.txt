@@ -11,7 +11,7 @@ set(PICO_DEFAULT_UART_RX_PIN "5" CACHE STRING "Default UART RX pin for stdio")
 if(PICO_BOARD STREQUAL "pimoroni_tufty2350")
   set(PICO_FLASH_SIZE_BYTES 16777216 CACHE STRING "Flash size" FORCE)
 endif()
-set(RP2350_WAIT_FOR_USB_SERIAL_MS "10000" CACHE STRING "Wait up to this many milliseconds for USB CDC serial connection before boot logs (0 disables)")
+set(RP2350_WAIT_FOR_USB_SERIAL_MS "0" CACHE STRING "Wait up to this many milliseconds for USB CDC serial connection before boot logs (0 disables)")
 set(RP2350_WIFI_SSID "$ENV{WIFI_SSID}" CACHE STRING "Optional Wi-Fi SSID exposed via getenv('WIFI_SSID')")
 set(RP2350_WIFI_PASS "$ENV{WIFI_PASS}" CACHE STRING "Optional Wi-Fi password exposed via getenv('WIFI_PASS')")
 
@@ -269,6 +269,7 @@ add_executable(php_mcu_firmware
   src/rp2350_vfs_syscalls.c
   src/rp2350_ca_bundle.c
   rp2350_rtc.c
+  rp2350_powman.c
   ${RP2350_DISPLAY_SOURCES}
   src/php_runtime_stubs.c
   rp2350_eval_zend.c
@@ -378,6 +379,7 @@ target_link_libraries(php_mcu_firmware
   hardware_adc
   hardware_gpio
   hardware_i2c
+  hardware_powman
   hardware_pwm
   hardware_spi
   hardware_xip_cache

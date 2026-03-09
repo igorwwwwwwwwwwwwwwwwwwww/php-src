@@ -8,6 +8,7 @@
 #include "hardware/structs/scb.h"
 
 #include "rp2350_eval.h"
+#include "rp2350_powman.h"
 #include "rp2350_psram.h"
 #include "rp2350_rtc.h"
 #include "rp2350_transport.h"
@@ -34,6 +35,9 @@ static void maybe_wait_for_usb_serial(void)
 int main(void)
 {
 	char build_line[96];
+	rp2350_powman_early_init();
+	(void)rp2350_powman_maybe_handle_long_press();
+	rp2350_powman_after_wake_init();
 	/* Avoid HardFault escalation when we can report the original fault class. */
 	scb_hw->shcsr |= M33_SHCSR_MEMFAULTENA_BITS
 		| M33_SHCSR_BUSFAULTENA_BITS

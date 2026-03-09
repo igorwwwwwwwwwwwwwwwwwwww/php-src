@@ -53,6 +53,7 @@
 #include "rp2350_eval.h"
 #include "rp2350_epd.h"
 #include "rp2350_tft.h"
+#include "rp2350_powman.h"
 #include "rp2350_psram.h"
 #include "rp2350_rtc.h"
 #include "rp2350_transport.h"
@@ -210,6 +211,9 @@ ZEND_FUNCTION(mcu_battery_raw_vbat);
 ZEND_FUNCTION(mcu_battery_raw_vref);
 ZEND_FUNCTION(mcu_light_raw);
 ZEND_FUNCTION(mcu_light_level);
+ZEND_FUNCTION(mcu_sleep);
+ZEND_FUNCTION(mcu_shipping_mode);
+ZEND_FUNCTION(mcu_wake_reason);
 ZEND_FUNCTION(mcu_wifi_init);
 ZEND_FUNCTION(mcu_wifi_connect);
 ZEND_FUNCTION(mcu_wifi_connect_start);
@@ -346,6 +350,15 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_light_level, 0, 0, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_shipping_mode, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wake_reason, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_wifi_init, 0, 0, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
@@ -412,6 +425,9 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_battery_raw_vref, arginfo_mcu_battery_raw_vref)
 	ZEND_FE(mcu_light_raw, arginfo_mcu_light_raw)
 	ZEND_FE(mcu_light_level, arginfo_mcu_light_level)
+	ZEND_FE(mcu_sleep, arginfo_mcu_sleep)
+	ZEND_FE(mcu_shipping_mode, arginfo_mcu_shipping_mode)
+	ZEND_FE(mcu_wake_reason, arginfo_mcu_wake_reason)
 	ZEND_FE(mcu_wifi_init, arginfo_mcu_wifi_init)
 	ZEND_FE(mcu_wifi_connect, arginfo_mcu_wifi_connect)
 	ZEND_FE(mcu_wifi_connect_start, arginfo_mcu_wifi_connect_start)
@@ -1166,6 +1182,30 @@ ZEND_FUNCTION(mcu_light_level)
 		RETURN_LONG(0);
 	}
 	RETURN_LONG((zend_long)rp2350_adc_read_avg(light_input, 10u));
+}
+
+ZEND_FUNCTION(mcu_sleep)
+{
+	int rc;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	rc = rp2350_powman_sleep();
+	RETURN_BOOL(rc == PICO_OK);
+}
+
+ZEND_FUNCTION(mcu_shipping_mode)
+{
+	int rc;
+
+	ZEND_PARSE_PARAMETERS_NONE();
+	rc = rp2350_powman_shipping_mode();
+	RETURN_BOOL(rc == PICO_OK);
+}
+
+ZEND_FUNCTION(mcu_wake_reason)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	RETURN_LONG((zend_long)rp2350_powman_wake_reason());
 }
 
 ZEND_FUNCTION(mcu_wifi_init)
