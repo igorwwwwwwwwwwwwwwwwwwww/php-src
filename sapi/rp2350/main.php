@@ -54,55 +54,77 @@ function wifi_status_label($status) {
 }
 
 function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6) {
+    $has_epd = function_exists('mcu_epd_render');
+    $has_tft = function_exists('mcu_tft_render');
+
     if ($mode_logo) {
         $logo = php_logo_data();
         if ($logo !== false) {
             $buf = $logo[0];
             $w = $logo[1];
             $h = $logo[2];
-            print "epd:render:logo\n";
-            mcu_epd_render($buf, $w, $h);
+            if ($has_epd) {
+                print "epd:render:logo\n";
+                mcu_epd_render($buf, $w, $h);
+            }
         }
         return;
     }
 
-    $buf = mcu_fb_create(MCU_EPD_WIDTH, MCU_EPD_HEIGHT, false);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 16, 'PHP RP2350', 3, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 54, 'PHP ' . PHP_VERSION, 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 78, 'BAT', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 70, 78, (string)$batt_pct, 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 114, 78, $usb_connected ? 'USB' : 'BAT', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 164, 78, $charging ? 'CHG' : 'IDLE', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 100, 'WIFI', 2, 2);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 70, 100, wifi_status_label($wifi_status), 2, 2);
+    if ($has_epd) {
+        $buf = mcu_fb_create(MCU_EPD_WIDTH, MCU_EPD_HEIGHT, false);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 16, 'PHP RP2350', 3, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 54, 'PHP ' . PHP_VERSION, 2, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 78, 'BAT', 2, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 70, 78, (string)$batt_pct, 2, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 114, 78, $usb_connected ? 'USB' : 'BAT', 2, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 164, 78, $charging ? 'CHG' : 'IDLE', 2, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 16, 100, 'WIFI', 2, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 70, 100, wifi_status_label($wifi_status), 2, 2);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 136, 'UPDATED', 1, 1);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 56, 136, date('Y-m-d\\TH:i:s'), 1, 1);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 152, 'V4', 1, 1);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 28, 152, (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-', 1, 1);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 164, 'V6', 1, 1);
+        mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 28, 164, (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-', 1, 1);
+        print "epd:render:text\n";
+        mcu_epd_render($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT);
+        return;
+    }
 
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 136, 'UPDATED', 1, 1);
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 56, 136, date('Y-m-d\\TH:i:s'), 1, 1);
+    if ($has_tft) {
+        $bg = mcu_rgb565(7, 12, 20);
+        $panel = mcu_rgb565(18, 28, 40);
+        $accent = mcu_rgb565(0, 180, 220);
+        $accent2 = mcu_rgb565(255, 180, 0);
+        $fg = mcu_rgb565(245, 248, 250);
+        $muted = mcu_rgb565(150, 168, 182);
+        $ok = mcu_rgb565(80, 220, 120);
+        $warn = mcu_rgb565(255, 210, 80);
+        $buf = mcu_tft_fb_create(MCU_TFT_WIDTH, MCU_TFT_HEIGHT, $bg);
 
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 152, 'V4', 1, 1);
-    mcu_draw_text(
-        $buf,
-        MCU_EPD_WIDTH,
-        MCU_EPD_HEIGHT,
-        28,
-        152,
-        (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-',
-        1,
-        1
-    );
-    mcu_draw_text($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT, 8, 164, 'V6', 1, 1);
-    mcu_draw_text(
-        $buf,
-        MCU_EPD_WIDTH,
-        MCU_EPD_HEIGHT,
-        28,
-        164,
-        (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-',
-        1,
-        1
-    );
-    print "epd:render:text\n";
-    mcu_epd_render($buf, MCU_EPD_WIDTH, MCU_EPD_HEIGHT);
+        mcu_tft_fill_rect($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, MCU_TFT_HEIGHT - 16, $panel);
+        mcu_tft_fill_rect($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 8, MCU_TFT_WIDTH - 16, 6, $accent);
+        mcu_tft_fill_rect($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 8, 54, MCU_TFT_WIDTH - 16, 2, $accent2);
+
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 18, 20, 'PHP RP2350', $fg, null, 3, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 64, 'PHP ' . PHP_VERSION, $muted, null, 2, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 96, 'BAT', $accent2, null, 2, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 92, 96, (string)$batt_pct . '%', $fg, null, 2, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 180, 96, $usb_connected ? 'USB' : 'BAT', $usb_connected ? $ok : $muted, null, 2, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 240, 96, $charging ? 'CHG' : 'IDLE', $charging ? $warn : $muted, null, 2, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 126, 'WIFI', $accent, null, 2, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 92, 126, wifi_status_label($wifi_status), $wifi_status === MCU_WIFI_LINK_UP ? $ok : $warn, null, 2, 2);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 160, 'UPDATED', $muted, null, 1, 1);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 84, 160, date('Y-m-d\\TH:i:s'), $fg, null, 1, 1);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 180, 'V4', $muted, null, 1, 1);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 44, 180, (is_string($wifi_ip4) && $wifi_ip4 !== '') ? $wifi_ip4 : '-', $fg, null, 1, 1);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 196, 'V6', $muted, null, 1, 1);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 44, 196, (is_string($wifi_ip6) && $wifi_ip6 !== '') ? $wifi_ip6 : '-', $fg, null, 1, 1);
+        mcu_tft_draw_text($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT, 20, 220, 'BTN C TOGGLE LOGO', $accent2, null, 1, 1);
+        print "tft:render:text\n";
+        mcu_tft_render($buf, MCU_TFT_WIDTH, MCU_TFT_HEIGHT);
+    }
 }
 
 $mode_logo = false;

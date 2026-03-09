@@ -52,6 +52,7 @@
 
 #include "rp2350_eval.h"
 #include "rp2350_epd.h"
+#include "rp2350_tft.h"
 #include "rp2350_psram.h"
 #include "rp2350_rtc.h"
 #include "rp2350_transport.h"
@@ -192,6 +193,11 @@ ZEND_FUNCTION(mcu_epd_clear);
 ZEND_FUNCTION(mcu_epd_set_pixel);
 ZEND_FUNCTION(mcu_epd_update);
 ZEND_FUNCTION(mcu_epd_render);
+ZEND_FUNCTION(mcu_tft_fill);
+ZEND_FUNCTION(mcu_tft_clear);
+ZEND_FUNCTION(mcu_tft_set_pixel);
+ZEND_FUNCTION(mcu_tft_backlight);
+ZEND_FUNCTION(mcu_tft_render);
 ZEND_FUNCTION(mcu_battery_voltage);
 ZEND_FUNCTION(mcu_battery_mv);
 ZEND_FUNCTION(mcu_usb_connected);
@@ -252,6 +258,32 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_epd_render, 0, 3, _IS_BOOL, 
 	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 1)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_fill, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, rgb565, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_clear, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, rgb565, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_set_pixel, 0, 3, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, rgb565, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_backlight, 0, 1, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, level, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_render, 0, 3, _IS_BOOL, 0)
+	ZEND_ARG_TYPE_INFO(0, bytes, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, width, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, height, IS_LONG, 0)
+	ZEND_ARG_TYPE_INFO(0, x, IS_LONG, 1)
+	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 1)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_voltage, 0, 0, IS_DOUBLE, 0)
 ZEND_END_ARG_INFO()
 
@@ -299,11 +331,20 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_button_wait, arginfo_mcu_button_wait)
 	ZEND_FE(mcu_led_set, arginfo_mcu_led_set)
 	ZEND_FE(mcu_led_level, arginfo_mcu_led_level)
+#if RP2350_ENABLE_EPD
 	ZEND_FE(mcu_epd_fill, arginfo_mcu_epd_fill)
 	ZEND_FE(mcu_epd_clear, arginfo_mcu_epd_clear)
 	ZEND_FE(mcu_epd_set_pixel, arginfo_mcu_epd_set_pixel)
 	ZEND_FE(mcu_epd_update, arginfo_mcu_epd_update)
 	ZEND_FE(mcu_epd_render, arginfo_mcu_epd_render)
+#endif
+#if RP2350_ENABLE_TFT
+	ZEND_FE(mcu_tft_fill, arginfo_mcu_tft_fill)
+	ZEND_FE(mcu_tft_clear, arginfo_mcu_tft_clear)
+	ZEND_FE(mcu_tft_set_pixel, arginfo_mcu_tft_set_pixel)
+	ZEND_FE(mcu_tft_backlight, arginfo_mcu_tft_backlight)
+	ZEND_FE(mcu_tft_render, arginfo_mcu_tft_render)
+#endif
 	ZEND_FE(mcu_battery_voltage, arginfo_mcu_battery_voltage)
 	ZEND_FE(mcu_battery_mv, arginfo_mcu_battery_mv)
 	ZEND_FE(mcu_usb_connected, arginfo_mcu_usb_connected)
@@ -394,10 +435,10 @@ static void rp2350_power_sense_init(void)
 	gpio_set_dir(BW_SW_POWER_EN, GPIO_OUT);
 	gpio_put(BW_SW_POWER_EN, 1);
 
-	/* VBAT_SENSE and SENSE_1V1 are from Badger 2350 reference firmware. */
+	/* Board-provided battery/reference sense GPIOs. */
 	adc_init();
-	adc_gpio_init(26); /* VBAT_SENSE */
-	adc_gpio_init(28); /* SENSE_1V1 */
+	adc_gpio_init(BW_VBAT_SENSE);
+	adc_gpio_init(BW_SENSE_1V1);
 
 	gpio_init(BW_VBUS_DETECT);
 	gpio_set_dir(BW_VBUS_DETECT, GPIO_IN);
@@ -679,6 +720,7 @@ ZEND_FUNCTION(mcu_led_level)
 	RETURN_TRUE;
 }
 
+#if RP2350_ENABLE_EPD
 ZEND_FUNCTION(mcu_epd_fill)
 {
 	bool black = false;
@@ -757,6 +799,94 @@ ZEND_FUNCTION(mcu_epd_render)
 	}
 	RETURN_BOOL(rp2350_epd_update());
 }
+#endif
+
+#if RP2350_ENABLE_TFT
+ZEND_FUNCTION(mcu_tft_fill)
+{
+	zend_long rgb565 = 0;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(rgb565)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_clear((uint16_t)rgb565));
+}
+
+ZEND_FUNCTION(mcu_tft_clear)
+{
+	zend_long rgb565 = 0;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(rgb565)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_clear((uint16_t)rgb565));
+}
+
+ZEND_FUNCTION(mcu_tft_set_pixel)
+{
+	zend_long x = 0;
+	zend_long y = 0;
+	zend_long rgb565 = 0;
+
+	ZEND_PARSE_PARAMETERS_START(3, 3)
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+		Z_PARAM_LONG(rgb565)
+	ZEND_PARSE_PARAMETERS_END();
+
+	RETURN_BOOL(rp2350_tft_set_pixel((int)x, (int)y, (uint16_t)rgb565));
+}
+
+ZEND_FUNCTION(mcu_tft_backlight)
+{
+	zend_long level = 0;
+
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_LONG(level)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (level < 0) {
+		level = 0;
+	} else if (level > 65535) {
+		level = 65535;
+	}
+
+	RETURN_BOOL(rp2350_tft_backlight((uint16_t)level));
+}
+
+ZEND_FUNCTION(mcu_tft_render)
+{
+	char *bytes = NULL;
+	size_t bytes_len = 0;
+	zend_long width = 0;
+	zend_long height = 0;
+	zend_long x = 0;
+	zend_long y = 0;
+	size_t pixel_count;
+
+	ZEND_PARSE_PARAMETERS_START(3, 5)
+		Z_PARAM_STRING(bytes, bytes_len)
+		Z_PARAM_LONG(width)
+		Z_PARAM_LONG(height)
+		Z_PARAM_OPTIONAL
+		Z_PARAM_LONG(x)
+		Z_PARAM_LONG(y)
+	ZEND_PARSE_PARAMETERS_END();
+
+	if (width <= 0 || height <= 0) {
+		RETURN_FALSE;
+	}
+
+	pixel_count = (size_t)width * (size_t)height;
+	if (bytes_len < pixel_count * 2u) {
+		RETURN_FALSE;
+	}
+
+	RETURN_BOOL(rp2350_tft_render_rgb565_bytes((const uint8_t *)bytes, bytes_len, (int)width, (int)height, (int)x, (int)y));
+}
+#endif
 
 ZEND_FUNCTION(mcu_usb_connected)
 {

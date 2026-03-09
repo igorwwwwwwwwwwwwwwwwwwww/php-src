@@ -2,6 +2,8 @@
 
 const MCU_EPD_WIDTH = 264;
 const MCU_EPD_HEIGHT = 176;
+const MCU_TFT_WIDTH = 320;
+const MCU_TFT_HEIGHT = 240;
 const MCU_BAT_MAX_V = 4.10;
 
 const MCU_FONT_5X7 = array(
@@ -166,4 +168,81 @@ function mcu_battery_voltage_from_raw($raw_vbat, $raw_vref) {
         return 0.0;
     }
     return $mv / 1000.0;
+}
+
+function mcu_rgb565($r, $g, $b) {
+    $r = (int)$r;
+    $g = (int)$g;
+    $b = (int)$b;
+    if ($r < 0) $r = 0;
+    if ($r > 255) $r = 255;
+    if ($g < 0) $g = 0;
+    if ($g > 255) $g = 255;
+    if ($b < 0) $b = 0;
+    if ($b > 255) $b = 255;
+    return (($r & 0xf8) << 8) | (($g & 0xfc) << 3) | ($b >> 3);
+}
+
+function mcu_tft_fb_create($w, $h, $color = 0x0000) {
+    $px = pack('n', $color & 0xffff);
+    return str_repeat($px, $w * $h);
+}
+
+function mcu_tft_set_pixel_rgb565(&$buf, $w, $h, $x, $y, $color) {
+    if ($x < 0 || $y < 0 || $x >= $w || $y >= $h) {
+        return;
+    }
+    $idx = (($y * $w) + $x) * 2;
+    $color &= 0xffff;
+    $buf[$idx] = chr(($color >> 8) & 0xff);
+    $buf[$idx + 1] = chr($color & 0xff);
+}
+
+function mcu_tft_fill_rect(&$buf, $w, $h, $x, $y, $rw, $rh, $color) {
+    if ($rw <= 0 || $rh <= 0) {
+        return;
+    }
+    for ($yy = 0; $yy < $rh; $yy++) {
+        for ($xx = 0; $xx < $rw; $xx++) {
+            mcu_tft_set_pixel_rgb565($buf, $w, $h, $x + $xx, $y + $yy, $color);
+        }
+    }
+}
+
+function mcu_tft_draw_char(&$buf, $w, $h, $x, $y, $ch, $fg, $bg = null, $scale = 1) {
+    if ($scale < 1) {
+        $scale = 1;
+    }
+    if (!isset(MCU_FONT_5X7[$ch])) {
+        $ch = ' ';
+    }
+    $rows = MCU_FONT_5X7[$ch];
+    for ($row = 0; $row < 7; $row++) {
+        $bits = $rows[$row];
+        for ($col = 0; $col < 5; $col++) {
+            $on = (($bits & (1 << (4 - $col))) !== 0);
+            if (!$on && $bg === null) {
+                continue;
+            }
+            $color = $on ? $fg : $bg;
+            for ($sy = 0; $sy < $scale; $sy++) {
+                for ($sx = 0; $sx < $scale; $sx++) {
+                    mcu_tft_set_pixel_rgb565($buf, $w, $h, $x + ($col * $scale) + $sx, $y + ($row * $scale) + $sy, $color);
+                }
+            }
+        }
+    }
+}
+
+function mcu_tft_draw_text(&$buf, $w, $h, $x, $y, $text, $fg, $bg = null, $scale = 1, $spacing = 1) {
+    $cx = $x;
+    $len = strlen($text);
+    for ($i = 0; $i < $len; $i++) {
+        $ch = $text[$i];
+        if ($ch >= 'a' && $ch <= 'z') {
+            $ch = chr(ord($ch) - 32);
+        }
+        mcu_tft_draw_char($buf, $w, $h, $cx, $y, $ch, $fg, $bg, $scale);
+        $cx += (5 * $scale) + $spacing;
+    }
 }

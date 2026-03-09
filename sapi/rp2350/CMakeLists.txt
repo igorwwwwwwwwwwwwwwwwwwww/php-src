@@ -3,9 +3,14 @@ cmake_minimum_required(VERSION 3.21)
 set(PICO_BOARD "pimoroni_badger2350" CACHE STRING "Pico board type")
 set(PICO_BOARD_HEADER_DIRS "${CMAKE_CURRENT_LIST_DIR}/boards" CACHE STRING "Custom board header search path")
 set(PICO_PLATFORM "rp2350" CACHE STRING "Pico platform")
+set(RP2350_ENABLE_EPD ON CACHE BOOL "Enable Badger/EPD support")
+set(RP2350_ENABLE_TFT OFF CACHE BOOL "Enable Tufty/TFT support")
 set(PICO_DEFAULT_UART "0" CACHE STRING "Default UART instance for stdio")
 set(PICO_DEFAULT_UART_TX_PIN "4" CACHE STRING "Default UART TX pin for stdio")
 set(PICO_DEFAULT_UART_RX_PIN "5" CACHE STRING "Default UART RX pin for stdio")
+if(PICO_BOARD STREQUAL "pimoroni_tufty2350")
+  set(PICO_FLASH_SIZE_BYTES 16777216 CACHE STRING "Flash size" FORCE)
+endif()
 set(RP2350_WAIT_FOR_USB_SERIAL_MS "10000" CACHE STRING "Wait up to this many milliseconds for USB CDC serial connection before boot logs (0 disables)")
 set(RP2350_WIFI_SSID "$ENV{WIFI_SSID}" CACHE STRING "Optional Wi-Fi SSID exposed via getenv('WIFI_SSID')")
 set(RP2350_WIFI_PASS "$ENV{WIFI_PASS}" CACHE STRING "Optional Wi-Fi password exposed via getenv('WIFI_PASS')")
@@ -240,6 +245,19 @@ set(RP2350_PICOHTTPPARSER_SOURCES
   ${PICO_SDK_PATH}/lib/lwip/src/apps/sntp/sntp.c
 )
 
+set(RP2350_DISPLAY_SOURCES)
+if(RP2350_ENABLE_EPD)
+  list(APPEND RP2350_DISPLAY_SOURCES
+    rp2350_epd.cpp
+    third_party/ssd1680/ssd1680.cpp
+  )
+endif()
+if(RP2350_ENABLE_TFT)
+  list(APPEND RP2350_DISPLAY_SOURCES
+    rp2350_tft.cpp
+  )
+endif()
+
 add_executable(php_mcu_firmware
   src/main.c
   src/fault_handlers.c
@@ -251,8 +269,7 @@ add_executable(php_mcu_firmware
   src/rp2350_vfs_syscalls.c
   src/rp2350_ca_bundle.c
   rp2350_rtc.c
-  rp2350_epd.cpp
-  third_party/ssd1680/ssd1680.cpp
+  ${RP2350_DISPLAY_SOURCES}
   src/php_runtime_stubs.c
   rp2350_eval_zend.c
   rp2350_psram.c
@@ -347,6 +364,8 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   PICO_MALLOC_PANIC=0
   RP2350_WIFI_SSID=\"${RP2350_WIFI_SSID_ESC}\"
   RP2350_WIFI_PASS=\"${RP2350_WIFI_PASS_ESC}\"
+  RP2350_ENABLE_EPD=$<BOOL:${RP2350_ENABLE_EPD}>
+  RP2350_ENABLE_TFT=$<BOOL:${RP2350_ENABLE_TFT}>
   # Keep SRAM .heap modest; newlib sbrk is redirected to a PSRAM window.
   PICO_HEAP_SIZE=16384
 )
