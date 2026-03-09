@@ -387,6 +387,10 @@ target_compile_options(php_mcu_firmware PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-include rp2350_posix_compat.h>
 )
 
+if(RP2350_ENABLE_TFT)
+  pico_generate_pio_header(php_mcu_firmware ${CMAKE_CURRENT_LIST_DIR}/st7789_parallel.pio)
+endif()
+
 pico_enable_stdio_usb(php_mcu_firmware 1)
 pico_enable_stdio_uart(php_mcu_firmware 1)
 
