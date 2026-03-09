@@ -1022,8 +1022,6 @@ ZEND_FUNCTION(mcu_light_raw)
 ZEND_FUNCTION(mcu_light_level)
 {
 	uint light_input;
-	uint16_t raw;
-	uint32_t pct;
 
 	ZEND_PARSE_PARAMETERS_NONE();
 	rp2350_power_sense_init();
@@ -1032,12 +1030,7 @@ ZEND_FUNCTION(mcu_light_level)
 	if (light_input == UINT_MAX) {
 		RETURN_LONG(0);
 	}
-	raw = rp2350_adc_read_avg(light_input, 10u);
-	pct = ((uint32_t)raw * 100u + 2047u) / 4095u;
-	if (pct > 100u) {
-		pct = 100u;
-	}
-	RETURN_LONG((zend_long)pct);
+	RETURN_LONG((zend_long)rp2350_adc_read_avg(light_input, 10u));
 }
 
 ZEND_FUNCTION(mcu_wifi_init)

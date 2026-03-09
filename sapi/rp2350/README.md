@@ -7,6 +7,7 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 ## TODO
 
 - Use `LIGHT_SENSE` on Badger 2350 too (stock/reference board also has an ambient light sensor; mirror the Tufty light-sense support on the EPD/Badger path).
+- Bring in zlib support so runtime PNG decoding / compressed asset loading becomes possible without pre-decoding everything offline.
 
 
 - Zend engine compiles directly into firmware; executes embedded `main.php`

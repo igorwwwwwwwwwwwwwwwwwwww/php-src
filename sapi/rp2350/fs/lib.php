@@ -165,20 +165,6 @@ function mcu_battery_voltage_from_raw($raw_vbat, $raw_vref) {
     return $mv / 1000.0;
 }
 
-function mcu_light_percent_from_raw($raw) {
-    if (!is_numeric($raw)) {
-        return 0;
-    }
-    $v = (int)($raw + 0);
-    if ($v <= 0) {
-        return 0;
-    }
-    if ($v >= 4095) {
-        return 100;
-    }
-    return (int) floor((($v * 100) + 2047) / 4095);
-}
-
 function mcu_rgb565($r, $g, $b) {
     $r = (int)$r;
     $g = (int)$g;
