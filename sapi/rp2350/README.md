@@ -9,6 +9,8 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 - Use `LIGHT_SENSE` on Badger 2350 too (stock/reference board also has an ambient light sensor; mirror the Tufty light-sense support on the EPD/Badger path).
 - Bring in zlib support so runtime PNG decoding / compressed asset loading becomes possible without pre-decoding everything offline.
 - Convert remaining RP2350 SAPI C++ sources (`*.cpp`) to C where practical, to reduce mixed-language build/runtime complexity.
+- Check whether any Zend optimizer functionality is still relevant/usable on RP2350, and whether current optimizer stubs can be reduced or replaced.
+- Finish Tufty deep sleep / wake parity work: current stock-inspired sleep groundwork and long-press path are implemented, but the device still wakes unexpectedly after entering sleep even with RTC wake disabled, Wi-Fi startup disabled, and direct-button wake testing; next step is powman register-level instrumentation/debugging (`powman_hw->state`, `current_pwrup_req`, wake-state transitions) instead of more blind wake-source changes.
 
 
 - Zend engine compiles directly into firmware; executes embedded `main.php`
