@@ -2,7 +2,8 @@
 #include "/tmp/litehtml/containers/cairo/container_cairo_pango.h"
 #include "/tmp/litehtml/containers/cairo/cairo_images_cache.h"
 #include <cairo.h>
-#include <gdk-pixbuf/gdk-pixbuf.h>
+#define STB_IMAGE_IMPLEMENTATION
+#include "/tmp/stb/stb_image.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -130,16 +131,14 @@ struct SimpleContainer : public container_cairo_pango {
         std::string path;
         make_url(src, baseurl, path);
         path = ensure_png_for_image(path);
-        GError* err = nullptr;
-        GdkPixbuf* pixbuf = gdk_pixbuf_new_from_file(path.c_str(), &err);
-        if (!pixbuf) {
+        int w = 0, h = 0, n = 0;
+        if (!stbi_info(path.c_str(), &w, &h, &n)) {
             sz.width = 0;
             sz.height = 0;
             return;
         }
-        sz.width = gdk_pixbuf_get_width(pixbuf);
-        sz.height = gdk_pixbuf_get_height(pixbuf);
-        g_object_unref(pixbuf);
+        sz.width = w;
+        sz.height = h;
     }
 
     cairo_surface_t* get_image(const std::string& raw_url) override {
@@ -149,27 +148,21 @@ struct SimpleContainer : public container_cairo_pango {
         if (surf) return surf;
 
         std::string path = ensure_png_for_image(url);
-        GError* err = nullptr;
-        GdkPixbuf* pixbuf = gdk_pixbuf_new_from_file(path.c_str(), &err);
-        if (!pixbuf) return nullptr;
+        int sw = 0, sh = 0, sch = 0;
+        unsigned char* src = stbi_load(path.c_str(), &sw, &sh, &sch, 4);
+        if (!src) return nullptr;
 
-        surf = cairo_image_surface_create(gdk_pixbuf_get_has_alpha(pixbuf) ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24,
-                                          gdk_pixbuf_get_width(pixbuf), gdk_pixbuf_get_height(pixbuf));
-        unsigned char* src = gdk_pixbuf_get_pixels(pixbuf);
-        int sw = gdk_pixbuf_get_width(pixbuf);
-        int sh = gdk_pixbuf_get_height(pixbuf);
-        int sstride = gdk_pixbuf_get_rowstride(pixbuf);
-        int sch = gdk_pixbuf_get_n_channels(pixbuf);
+        surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, sw, sh);
         unsigned char* dst = cairo_image_surface_get_data(surf);
         int dstride = cairo_image_surface_get_stride(surf);
         for (int y = 0; y < sh; y++) {
-            unsigned char* srow = src + y * sstride;
+            unsigned char* srow = src + y * sw * 4;
             unsigned char* drow = dst + y * dstride;
             for (int x = 0; x < sw; x++) {
-                unsigned char r = srow[x * sch + 0];
-                unsigned char g = srow[x * sch + 1];
-                unsigned char b = srow[x * sch + 2];
-                unsigned char a = sch >= 4 ? srow[x * sch + 3] : 255;
+                unsigned char r = srow[x * 4 + 0];
+                unsigned char g = srow[x * 4 + 1];
+                unsigned char b = srow[x * 4 + 2];
+                unsigned char a = srow[x * 4 + 3];
                 drow[x * 4 + 0] = (unsigned char)((b * a) / 255);
                 drow[x * 4 + 1] = (unsigned char)((g * a) / 255);
                 drow[x * 4 + 2] = (unsigned char)((r * a) / 255);
@@ -177,7 +170,7 @@ struct SimpleContainer : public container_cairo_pango {
             }
         }
         cairo_surface_mark_dirty(surf);
-        g_object_unref(pixbuf);
+        stbi_image_free(src);
         images.add_image(url, surf);
         return cairo_surface_reference(surf);
     }
