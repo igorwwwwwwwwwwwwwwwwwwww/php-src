@@ -121,7 +121,7 @@ function mcu_battery_level_from_voltage($voltage) {
         return 0;
     }
 
-    $base = 1.0 + pow(($v / 3.2), 80.0);
+    $base = 1.0 + pow(($v / 3.7), 80.0);
     $den = pow($base, 0.165);
     if (!is_numeric($den) || $den <= 0.0) {
         return 0;
