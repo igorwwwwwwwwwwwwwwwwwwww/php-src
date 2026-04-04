@@ -52,6 +52,9 @@ include("${PICO_SDK_PATH}/pico_sdk_init.cmake")
 
 project(php_mcu_firmware C CXX ASM)
 
+set(PICO_CXX_ENABLE_EXCEPTIONS 1)
+set(PICO_CXX_ENABLE_RTTI 1)
+
 pico_sdk_init()
 
 set(PHP_SRC_ROOT "${CMAKE_CURRENT_LIST_DIR}/../..")
@@ -258,6 +261,17 @@ if(RP2350_ENABLE_TFT)
   )
 endif()
 
+file(GLOB RP2350_LITEHTML_SOURCES CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/*.cpp
+)
+file(GLOB RP2350_GUMBO_SOURCES CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/*.c
+)
+list(REMOVE_ITEM RP2350_GUMBO_SOURCES
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/char_ref.rl
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/tag.in
+)
+
 add_executable(php_mcu_firmware
   src/main.c
   src/fault_handlers.c
@@ -268,6 +282,7 @@ add_executable(php_mcu_firmware
   src/rp2350_wifi.c
   src/rp2350_vfs_syscalls.c
   src/rp2350_ca_bundle.c
+  src/rp2350_litehtml_stub.cpp
   rp2350_rtc.c
   rp2350_powman.c
   ${RP2350_DISPLAY_SOURCES}
@@ -319,6 +334,8 @@ add_executable(php_mcu_firmware
   ${RP2350_LEXBOR_SOURCES}
   ${RP2350_NGHTTP2_SOURCES}
   ${RP2350_PICOHTTPPARSER_SOURCES}
+  ${RP2350_LITEHTML_SOURCES}
+  ${RP2350_GUMBO_SOURCES}
   ${PHP_SRC_ROOT}/TSRM/TSRM.c
   ${ZEND_ENGINE_SOURCES}
 )
@@ -333,6 +350,12 @@ target_include_directories(php_mcu_firmware PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib/includes
   ${CMAKE_CURRENT_LIST_DIR}/third_party/nghttp2/lib
   ${CMAKE_CURRENT_LIST_DIR}/third_party/picohttpparser
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/include
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/include/litehtml
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/include
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/include/gumbo
   ${PHP_SRC_ROOT}
   ${PHP_SRC_ROOT}/main
   ${PHP_SRC_ROOT}/TSRM
@@ -369,10 +392,12 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   RP2350_ENABLE_TFT=$<BOOL:${RP2350_ENABLE_TFT}>
   # Keep SRAM .heap modest; newlib sbrk is redirected to a PSRAM window.
   PICO_HEAP_SIZE=16384
+  LITEHTML_NO_THREADS=1
 )
 
 target_link_libraries(php_mcu_firmware
   pico_stdlib
+  pico_cxx_options
   pico_cyw43_arch_lwip_threadsafe_background
   pico_mbedtls
   pico_lwip_mbedtls
@@ -387,6 +412,11 @@ target_link_libraries(php_mcu_firmware
 
 target_compile_options(php_mcu_firmware PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-include rp2350_posix_compat.h>
+  $<$<COMPILE_LANGUAGE:CXX>:-fexceptions -frtti -fno-unwind-tables>
+)
+
+target_compile_options(pico_cxx_options INTERFACE
+  $<$<COMPILE_LANGUAGE:CXX>:-fexceptions -frtti>
 )
 
 if(RP2350_ENABLE_TFT)
@@ -395,5 +425,10 @@ endif()
 
 pico_enable_stdio_usb(php_mcu_firmware 1)
 pico_enable_stdio_uart(php_mcu_firmware 1)
+
+set_source_files_properties(
+  ${RP2350_GUMBO_SOURCES}
+  PROPERTIES COMPILE_OPTIONS "-include;gumbo_error_alias.h"
+)
 
 pico_add_extra_outputs(php_mcu_firmware)

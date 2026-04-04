@@ -290,8 +290,13 @@ x/16i $pc-16
 
 ## VFS behavior
 
-- `main.php` and each file in `fs/*.php` are embedded into flash at build time.
+- `main.php` and each file under `fs/` are embedded into flash at build time, including nested asset directories such as `fs/phpnet/...`.
 - Use absolute paths from PHP, for example `require '/lib.php';`.
+- Non-PHP assets under `fs/` are also available through the same embedded VFS path mapping.
+- Host-side php.net snapshot assets can be refreshed with:
+  - `php sapi/rp2350/tools/phpnet_mirror.php https://www.php.net/ sapi/rp2350/fs/phpnet`
+  - current mirrored snapshot is embedded under `/phpnet/www.php.net/...`
+- `third_party/litehtml/` is now vendored into the tree for an experimental on-device offline renderer path; current firmware wiring only proves the library set compiles and can see the embedded php.net snapshot through VFS.
 - `stream_open_function` and `resolve_path_function` are wired into Zend for this VFS path.
 - libc/newlib `_open()` is still a trap stub unless you implement a real filesystem backend.
 
@@ -320,6 +325,11 @@ Allocator notes:
   - Keep a small startup-persistent arena for module/arginfo/class metadata.
   - Add real `malloc/free/realloc` semantics in PSRAM for long-lived runtime allocations.
   - Route only truly persistent allocations to the persistent arena.
+- UART interaction modes:
+  - Add a UART shell mode alongside the default log mode.
+  - Hitting Enter on UART should switch from passive log output into an interactive PHP shell with readline-style line editing/history if feasible on target.
+  - Exiting the shell via Ctrl-D or `exit` should return cleanly to log mode rather than terminating the firmware loop.
+  - Keep the shell/log ownership model explicit so background logs do not corrupt the shell prompt while interactive input is active.
 - Power/scheduling lifecycle:
   - Refine button interrupt wait/scheduler path:
     - Current `mcu_button_wait()` is semaphore+IRQ wake with timeout and works for responsiveness.

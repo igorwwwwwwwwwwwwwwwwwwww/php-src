@@ -178,18 +178,29 @@ function render_logo_page() {
     print "\n";
 }
 
-function render_web_page($body) {
+function load_phpnet_snapshot_text() {
+    $path = '/phpnet/www.php.net/index.html';
+    $body = @file_get_contents($path);
+    if (!is_string($body) || $body === '') {
+        return null;
+    }
+    return $body;
+}
+
+function render_web_page($body, $source = 'live') {
     if (!function_exists('mcu_tft_fb_clear')) {
         return;
     }
     $bg = mcu_rgb565(7, 12, 20);
     $panel = mcu_rgb565(18, 28, 40);
     $fg = mcu_rgb565(245, 248, 250);
+    $muted = mcu_rgb565(150, 170, 190);
     $accent = mcu_rgb565(0, 180, 220);
     mcu_tft_fb_clear($bg);
     mcu_tft_fb_fill_rect(8, 8, MCU_TFT_WIDTH - 16, MCU_TFT_HEIGHT - 16, $panel);
     mcu_tft_fb_fill_rect(8, 8, MCU_TFT_WIDTH - 16, 6, $accent);
     mcu_tft_fb_draw_text(18, 20, 'WEB PHP.NET', $fg, 2, 2);
+    mcu_tft_fb_draw_text(210, 22, strtoupper((string)$source), $muted, 1, 1);
     $remaining = (string)$body;
     $line_len = 34;
     $max_lines = 12;
@@ -317,13 +328,13 @@ function render_text_page($batt_pct, $usb_connected, $charging, $wifi_status, $w
     print "\n";
 }
 
-function set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body) {
+function set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body, $web_source) {
     if ($page === 'logo') {
         render_logo_page();
         return;
     }
     if ($page === 'web') {
-        render_web_page($web_body);
+        render_web_page($web_body, $web_source);
         return;
     }
     render_text_page($batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, true);
@@ -347,6 +358,12 @@ $wifi_ip6 = null;
 $light_raw = function_exists('mcu_light_raw') ? mcu_light_raw() : 0;
 $backlight_pct = 100;
 $web_body = '';
+$web_source = 'none';
+$snapshot_body = load_phpnet_snapshot_text();
+if (is_string($snapshot_body) && $snapshot_body !== '') {
+    $web_body = $snapshot_body;
+    $web_source = 'snap';
+}
 if (function_exists('mcu_tft_backlight')) {
     mcu_tft_backlight(65535);
 }
@@ -358,7 +375,7 @@ run_pcre_smoke();
 run_hash_smoke();
 run_json_smoke();
 
-set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body);
+set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body, $web_source);
 
 $wifi_ssid = getenv('WIFI_SSID');
 $wifi_pass = getenv('WIFI_PASS');
@@ -514,7 +531,7 @@ while (true) {
 
         if ($a_down && !$a_was_down) {
             $page = 'text';
-            set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body);
+            set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body, $web_source);
             $needs_redraw = false;
             $next_redraw_at = microtime(true) + ($frame_interval_us / 1000000.0);
             print "mode:text\n";
@@ -543,7 +560,7 @@ while (true) {
         }
         if ($c_down && !$c_was_down) {
             $page = 'logo';
-            set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body);
+            set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body, $web_source);
             $needs_redraw = false;
             print "mode:logo\n";
         }
@@ -574,8 +591,9 @@ while (true) {
                 print $head;
                 print "\n";
                 $web_body = $body;
+                $web_source = 'live';
                 $page = 'web';
-                set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body);
+                set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body, $web_source);
                 $needs_redraw = false;
             }
         }
