@@ -44,6 +44,15 @@ public:
                    litehtml::uint_ptr hFont,
                    litehtml::web_color color,
                    const litehtml::position& pos) override;
+public:
+    static void blend_text_to_argb32(uint32_t* dst,
+                                     int dst_w,
+                                     int dst_h,
+                                     int dst_stride_pixels,
+                                     const char* text,
+                                     litehtml::uint_ptr hFont,
+                                     litehtml::web_color color,
+                                     const litehtml::position& pos);
 private:
     static void load_font_face(stb_font_face& face, const char* path);
 };

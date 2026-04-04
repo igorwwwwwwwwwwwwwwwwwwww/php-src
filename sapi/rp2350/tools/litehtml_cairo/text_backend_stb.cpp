@@ -76,38 +76,39 @@ litehtml::pixel_t stb_text_backend::text_width(const char* text, litehtml::uint_
     return width;
 }
 
-void stb_text_backend::draw_text(litehtml::uint_ptr hdc,
-                                 const char* text,
-                                 litehtml::uint_ptr hFont,
-                                 litehtml::web_color color,
-                                 const litehtml::position& pos) {
+void stb_text_backend::blend_text_to_argb32(uint32_t* dst,
+                                           int dst_w,
+                                           int dst_h,
+                                           int dst_stride_pixels,
+                                           const char* text,
+                                           litehtml::uint_ptr hFont,
+                                           litehtml::web_color color,
+                                           const litehtml::position& pos) {
     auto* fi = (stb_font_inst*) hFont;
-    if (!fi || !fi->face || !fi->face->ok) return;
-    auto* cr = (cairo_t*) hdc;
-    cairo_surface_t* target = cairo_get_target(cr);
-    cairo_surface_flush(target);
-    unsigned char* data = cairo_image_surface_get_data(target);
-    int stride = cairo_image_surface_get_stride(target);
-    int surf_w = cairo_image_surface_get_width(target);
-    int surf_h = cairo_image_surface_get_height(target);
+    if (!fi || !fi->face || !fi->face->ok || !dst) return;
     int x = (int)pos.x;
     int baseline = (int)pos.y + (int)(fi->ascent * fi->scale);
     int prev = 0;
     auto blend_glyph = [&](unsigned char* bmp, int w, int h, int dx0, int dy0) {
         for (int yy = 0; yy < h; yy++) {
             int dy = dy0 + yy;
-            if (dy < 0 || dy >= surf_h) continue;
-            unsigned char* row = data + dy * stride;
+            if (dy < 0 || dy >= dst_h) continue;
+            uint32_t* row = dst + dy * dst_stride_pixels;
             for (int xx = 0; xx < w; xx++) {
                 int dx = dx0 + xx;
-                if (dx < 0 || dx >= surf_w) continue;
+                if (dx < 0 || dx >= dst_w) continue;
                 unsigned char a = bmp[yy * w + xx];
                 if (!a) continue;
-                unsigned char* px = row + dx * 4;
-                px[0] = (unsigned char)((color.blue * a + px[0] * (255 - a)) / 255);
-                px[1] = (unsigned char)((color.green * a + px[1] * (255 - a)) / 255);
-                px[2] = (unsigned char)((color.red * a + px[2] * (255 - a)) / 255);
-                px[3] = (unsigned char)std::min(255, (int)px[3] + (int)a);
+                uint32_t& px = row[dx];
+                unsigned char pb = (unsigned char)(px & 0xff);
+                unsigned char pg = (unsigned char)((px >> 8) & 0xff);
+                unsigned char pr = (unsigned char)((px >> 16) & 0xff);
+                unsigned char pa = (unsigned char)((px >> 24) & 0xff);
+                unsigned char nb = (unsigned char)((color.blue * a + pb * (255 - a)) / 255);
+                unsigned char ng = (unsigned char)((color.green * a + pg * (255 - a)) / 255);
+                unsigned char nr = (unsigned char)((color.red * a + pr * (255 - a)) / 255);
+                unsigned char na = (unsigned char)std::min(255, (int)pa + (int)a);
+                px = ((uint32_t)na << 24) | ((uint32_t)nr << 16) | ((uint32_t)ng << 8) | (uint32_t)nb;
             }
         }
     };
@@ -128,6 +129,22 @@ void stb_text_backend::draw_text(litehtml::uint_ptr hdc,
         x += (int)(ax * fi->scale);
         prev = cp;
     }
+}
+
+void stb_text_backend::draw_text(litehtml::uint_ptr hdc,
+                                 const char* text,
+                                 litehtml::uint_ptr hFont,
+                                 litehtml::web_color color,
+                                 const litehtml::position& pos) {
+    auto* fi = (stb_font_inst*) hFont;
+    auto* cr = (cairo_t*) hdc;
+    cairo_surface_t* target = cairo_get_target(cr);
+    cairo_surface_flush(target);
+    auto* data = reinterpret_cast<uint32_t*>(cairo_image_surface_get_data(target));
+    int stride_pixels = cairo_image_surface_get_stride(target) / 4;
+    int surf_w = cairo_image_surface_get_width(target);
+    int surf_h = cairo_image_surface_get_height(target);
+    blend_text_to_argb32(data, surf_w, surf_h, stride_pixels, text, hFont, color, pos);
     cairo_surface_mark_dirty(target);
 
     litehtml::web_color deco = color;

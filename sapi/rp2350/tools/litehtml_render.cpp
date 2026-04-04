@@ -13,6 +13,7 @@
 #include <vector>
 #include <cstdlib>
 #include <cstring>
+#include <cstdio>
 
 namespace fs = std::filesystem;
 
@@ -75,6 +76,7 @@ static std::string ensure_png_for_image(const std::string& path) {
 }
 
 struct SimpleContainer : public container_cairo_pango {
+    bool trace = std::getenv("LITEHTML_TRACE") != nullptr;
     std::string base_path;
     cairo_images_cache images;
     int screen_width;
@@ -83,6 +85,7 @@ struct SimpleContainer : public container_cairo_pango {
     SimpleContainer(std::string base, int w, int h) : base_path(std::move(base)), screen_width(w), screen_height(h) {}
 
     void load_image(const char* src, const char* baseurl, bool) override {
+        if (trace) std::fprintf(stderr, "LOAD_IMAGE src=%s base=%s\n", src ? src : "", baseurl ? baseurl : "");
         litehtml::size sz;
         get_image_size(src, baseurl, sz);
     }
@@ -133,10 +136,12 @@ struct SimpleContainer : public container_cairo_pango {
         path = ensure_png_for_image(path);
         int w = 0, h = 0, n = 0;
         if (!stbi_info(path.c_str(), &w, &h, &n)) {
+            if (trace) std::fprintf(stderr, "IMAGE_SIZE src=%s path=%s w=0 h=0\n", src ? src : "", path.c_str());
             sz.width = 0;
             sz.height = 0;
             return;
         }
+        if (trace) std::fprintf(stderr, "IMAGE_SIZE src=%s path=%s w=%d h=%d\n", src ? src : "", path.c_str(), w, h);
         sz.width = w;
         sz.height = h;
     }
@@ -148,6 +153,7 @@ struct SimpleContainer : public container_cairo_pango {
         if (surf) return surf;
 
         std::string path = ensure_png_for_image(url);
+        if (trace) std::fprintf(stderr, "GET_IMAGE url=%s path=%s\n", url.c_str(), path.c_str());
         int sw = 0, sh = 0, sch = 0;
         unsigned char* src = stbi_load(path.c_str(), &sw, &sh, &sch, 4);
         if (!src) return nullptr;

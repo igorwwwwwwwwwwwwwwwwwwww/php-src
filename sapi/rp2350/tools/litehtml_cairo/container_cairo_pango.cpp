@@ -22,6 +22,12 @@ litehtml::pixel_t container_cairo_pango::text_width(const char *text, litehtml::
 void container_cairo_pango::draw_text(litehtml::uint_ptr hdc, const char *text, litehtml::uint_ptr hFont,
                                       litehtml::web_color color, const litehtml::position &pos)
 {
+    if(std::getenv("LITEHTML_TRACE")) {
+        std::string s = text ? text : "";
+        if (s.size() > 40) s.resize(40);
+        fprintf(stderr, "DRAW_TEXT x=%d y=%d w=%d h=%d text=%s\n",
+                (int)pos.x, (int)pos.y, (int)pos.width, (int)pos.height, s.c_str());
+    }
     apply_clip((cairo_t*) hdc);
     m_backend.draw_text(hdc, text, hFont, color, pos);
 }

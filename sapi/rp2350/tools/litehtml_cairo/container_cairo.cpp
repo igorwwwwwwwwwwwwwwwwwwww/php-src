@@ -99,6 +99,14 @@ void container_cairo::clip_background_layer(cairo_t* cr, const litehtml::backgro
 
 void container_cairo::draw_image(litehtml::uint_ptr hdc, const litehtml::background_layer& layer, const std::string& url, const std::string& base_url)
 {
+	if(std::getenv("LITEHTML_TRACE")) {
+		fprintf(stderr, "DRAW_IMAGE url=%s x=%d y=%d w=%d h=%d ox=%d oy=%d ow=%d oh=%d rx=%d ry=%d rw=%d rh=%d repeat=%d\n",
+			url.c_str(),
+			(int)layer.border_box.x, (int)layer.border_box.y, (int)layer.border_box.width, (int)layer.border_box.height,
+			(int)layer.origin_box.x, (int)layer.origin_box.y, (int)layer.origin_box.width, (int)layer.origin_box.height,
+			(int)layer.clip_box.x, (int)layer.clip_box.y, (int)layer.clip_box.width, (int)layer.clip_box.height,
+			(int)layer.repeat);
+	}
 	if(url.empty() || (layer.clip_box.width == 0 && layer.clip_box.height == 0) )
 	{
 		return;
@@ -171,6 +179,11 @@ void container_cairo::draw_image(litehtml::uint_ptr hdc, const litehtml::backgro
 
 void container_cairo::draw_solid_fill(litehtml::uint_ptr hdc, const litehtml::background_layer& layer, const litehtml::web_color& color)
 {
+	if(std::getenv("LITEHTML_TRACE")) {
+		fprintf(stderr, "DRAW_FILL x=%d y=%d w=%d h=%d rgba=%d,%d,%d,%d\n",
+			(int)layer.border_box.x, (int)layer.border_box.y, (int)layer.border_box.width, (int)layer.border_box.height,
+			(int)color.red, (int)color.green, (int)color.blue, (int)color.alpha);
+	}
 	if(color == litehtml::web_color::transparent)
 	{
 		return;
