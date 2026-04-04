@@ -570,7 +570,10 @@ while (true) {
             print "web:render:litehtml:rc:";
             print $rc;
             print "\n";
-            if ($rc !== 0) {
+            if ($rc === 0) {
+                $page = 'web';
+                $needs_redraw = false;
+            } elseif ($rc !== 0) {
                 $url = 'https://www.php.net/';
                 $ctx = stream_context_create([
                     'http' => [

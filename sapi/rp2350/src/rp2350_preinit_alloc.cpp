@@ -18,6 +18,10 @@
 #include <cstdlib>
 #include <new>
 
+#include <pico/types.h>
+#include "rp2350_psram.h"
+#include "rp2350_psram_layout.h"
+
 /* 24 KB static arena in SRAM -- sized to hold litehtml's static tables.
  * Adjust if static-init allocations grow. */
 #define PREINIT_ARENA_SIZE (96u * 1024u)
@@ -42,6 +46,45 @@ static void *arena_alloc(size_t n)
  * Called from main() after rp2350_psram_init() succeeds.
  * After this point operator new delegates to malloc.
  */
+/*
+ * Litehtml render arena -- a simple bump allocator in a dedicated PSRAM
+ * region so litehtml document trees don't compete with the newlib heap.
+ * Call rp2350_render_arena_begin() before a render pass and
+ * rp2350_render_arena_end() after to reset the bump pointer.
+ * Allocations from this arena are freed in bulk on reset.
+ */
+static uint8_t *s_render_base  = nullptr;
+static size_t   s_render_used  = 0;
+static bool     s_render_live  = false;
+
+extern "C" void rp2350_render_arena_begin(void)
+{
+	if (!s_render_base) {
+		s_render_base = (uint8_t *)RP2350_PSRAM_BASE + RP2350_LITEHTML_ARENA_OFFSET;
+	}
+	s_render_used = 0;
+	s_render_live = true;
+}
+
+extern "C" void rp2350_render_arena_end(void)
+{
+	s_render_live  = false;
+	s_render_used  = 0;
+}
+
+static void *render_arena_alloc(size_t n)
+{
+	size_t aligned = (s_render_used + 7u) & ~7u;
+	if (aligned + n > RP2350_LITEHTML_ARENA_SIZE) {
+		printf("[oom] render arena exhausted at %u + %u\r\n",
+			(unsigned)aligned, (unsigned)n);
+		fflush(stdout);
+		while (true) { __asm volatile("bkpt #0"); }
+	}
+	s_render_used = aligned + n;
+	return s_render_base + aligned;
+}
+
 extern "C" void rp2350_preinit_alloc_psram_ready(void)
 {
 	/* Log arena high-water mark so we can tune PREINIT_ARENA_SIZE. */
@@ -60,8 +103,15 @@ extern "C" void rp2350_preinit_alloc_psram_ready(void)
 void *operator new(size_t n)
 {
 	if (!s_psram_live) return arena_alloc(n);
+	if (s_render_live)  return render_arena_alloc(n);
 	void *p = malloc(n);
-	if (!p) throw std::bad_alloc();
+	if (!p) {
+		/* Can't throw bad_alloc -- that itself needs allocation.
+		 * Print diagnostics and halt so GDB can show the caller. */
+		printf("[oom] operator new(%u) failed, heap exhausted\r\n", (unsigned)n);
+		fflush(stdout);
+		while (true) { __asm volatile("bkpt #0"); }
+	}
 	return p;
 }
 
@@ -72,12 +122,18 @@ void *operator new[](size_t n)
 
 void operator delete(void *p) noexcept
 {
-	/* Arena allocations are never freed; only free PSRAM-era allocations. */
 	if (!p) return;
-	uintptr_t addr = (uintptr_t)p;
+	uintptr_t addr        = (uintptr_t)p;
+	/* Pre-init SRAM arena -- never freed */
 	uintptr_t arena_start = (uintptr_t)s_arena;
 	uintptr_t arena_end   = arena_start + PREINIT_ARENA_SIZE;
-	if (addr >= arena_start && addr < arena_end) return; /* arena -- ignore */
+	if (addr >= arena_start && addr < arena_end) return;
+	/* Render arena -- freed in bulk on rp2350_render_arena_end() */
+	if (s_render_base) {
+		uintptr_t render_start = (uintptr_t)s_render_base;
+		uintptr_t render_end   = render_start + RP2350_LITEHTML_ARENA_SIZE;
+		if (addr >= render_start && addr < render_end) return;
+	}
 	free(p);
 }
 

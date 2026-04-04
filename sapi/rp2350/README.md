@@ -296,20 +296,37 @@ x/16i $pc-16
 - Host-side php.net snapshot assets can be refreshed with:
   - `php sapi/rp2350/tools/phpnet_mirror.php https://www.php.net/ sapi/rp2350/fs/phpnet`
   - current mirrored snapshot is embedded under `/phpnet/www.php.net/...`
-- `third_party/litehtml/` is now vendored into the tree for an experimental on-device renderer path.
-- The php.net snapshot mirror under `fs/phpnet/...` is the current deterministic input for renderer bring-up.
-- `src/rp2350_litehtml_encodings_stub.cpp` intentionally replaces litehtml's heavyweight encoding machinery with a tiny UTF-8-only path for RP2350 bring-up; this is acceptable for the current embedded php.net snapshot workflow but is not a general arbitrary-encoding solution.
-- There is an experimental standalone Tufty renderer target:
-  - enable with `-DRP2350_ENABLE_LITEHTML_TFT=ON -DPICO_BOARD=pimoroni_tufty2350 -DRP2350_ENABLE_TFT=ON`
-  - target name: `rp2350_litehtml_tft_test`
-  - it fits only after dropping litehtml's full encoding tables in favor of the UTF-8 stub
-- The main Tufty PHP firmware now also includes a native litehtml render hook exposed to PHP as `mcu_litehtml_render_phpnet_snapshot()`.
-- Button `B` in `main.php` now tries the native litehtml php.net snapshot renderer first and falls back to the older live-fetch text/snippet path if the native renderer returns nonzero.
+- `third_party/litehtml/` is vendored into the tree. It compiles and links into the firmware successfully.
+- The php.net snapshot mirror under `fs/phpnet/...` is embedded via the recursive VFS builder.
+- `src/rp2350_litehtml_encodings_stub.cpp` replaces litehtml's heavyweight encoding tables with a tiny UTF-8-only stub; required to fit the binary.
 - **Important memory lesson:** for Tufty builds, disable the Badger/EPD path:
   - use `-DRP2350_ENABLE_EPD=OFF`
   - otherwise `third_party/ssd1680/ssd1680.cpp` drags in a ~191 KB `.uninitialized_data` block and needlessly blows SRAM on a TFT-only build
-- With `RP2350_ENABLE_EPD=OFF`, the full Tufty PHP firmware with the native litehtml hook and the usual bundled extensions fits again.
+- With `RP2350_ENABLE_EPD=OFF`, the full Tufty PHP firmware with litehtml and the usual bundled extensions fits in flash and SRAM.
 - Extension trimming experiments (`json`, `hash`, `pcre`) were not the real memory lever; the dominant fix was excluding the unused EPD/ssd1680 side from Tufty builds.
+
+### litehtml on-device rendering -- DOES NOT WORK (memory)
+
+litehtml was fully wired up as a native PHP callable (`mcu_litehtml_render_phpnet_snapshot()`) and reached the point of actually parsing HTML on-device. It does not work because:
+
+- litehtml's document tree is too large for 8MB PSRAM once PHP is also resident:
+  - full php.net `index.html` (52KB): blows 4MB render arena during `createFromString`
+  - stripped `tft.html` (5KB hero-only): still exhausts 3MB render arena (uses ~3.1MB for the tree)
+  - each litehtml node is a `shared_ptr` with a separately heap-allocated control block;
+    overhead per node is very high relative to the actual text content
+- PSRAM layout constraints:
+  - 2MB newlib heap (for PHP + STL)
+  - ≥4MB Zend mmap arena (needs 2MB-aligned 2MB chunks; at least 2 must fit)
+  - leaves at most ~2MB for a litehtml arena, which is not enough
+- litehtml C++ static globals also heap-allocate before `main()`, requiring a pre-PSRAM SRAM
+  arena (`src/rp2350_preinit_alloc.cpp`); this was solved but is a sign of how allocation-heavy
+  the library is throughout
+
+**Conclusion:** litehtml is not viable on RP2350 in its current form. Options for future investigation:
+- A purpose-built minimal HTML renderer using fixed-size node pools (no `shared_ptr`, no STL containers per node)
+- Server-side pre-rendering: fetch a pre-rendered bitmap or a very simple text/layout description from a proxy endpoint
+- Render on the host and send a compressed framebuffer over Wi-Fi
+- Accept that the web page view is text-only on this hardware and move on
 - `stream_open_function` and `resolve_path_function` are wired into Zend for this VFS path.
 - libc/newlib `_open()` is still a trap stub unless you implement a real filesystem backend.
 

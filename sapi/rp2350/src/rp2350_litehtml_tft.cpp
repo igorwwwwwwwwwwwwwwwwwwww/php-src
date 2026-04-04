@@ -6,6 +6,7 @@
 #include <memory>
 #include <cstring>
 #include <cstdio>
+#include <exception>
 
 static const rp2350_vfs_file_t* rp2350_vfs_find(const char* path) {
     for (size_t i = 0; i < rp2350_vfs_files_count; i++) {
@@ -24,6 +25,28 @@ static std::string dirname_of(const std::string& path) {
     size_t p = path.rfind('/');
     if (p == std::string::npos || p == 0) return "/";
     return path.substr(0, p);
+}
+
+// Convert a URL path (possibly with query string) to the VFS key format
+// used by phpnet_mirror.php: '?' -> '__q_', then percent-encode &, =, /
+static std::string url_to_vfs_path(const std::string& url) {
+    std::string out;
+    out.reserve(url.size() + 8);
+    bool in_query = false;
+    for (size_t i = 0; i < url.size(); i++) {
+        char c = url[i];
+        if (!in_query && c == '?') {
+            out += "__q_";
+            in_query = true;
+        } else if (in_query && (c == '&' || c == '=' || c == '/')) {
+            char buf[4];
+            snprintf(buf, sizeof(buf), "%%%02X", (unsigned char)c);
+            out += buf;
+        } else {
+            out += c;
+        }
+    }
+    return out;
 }
 
 static std::string join_url(const std::string& base, const std::string& url) {
@@ -111,9 +134,12 @@ public:
         }
     }
     void import_css(std::string& text, const std::string& url, std::string& baseurl) override {
-        std::string path = join_url(base_path.empty() ? "/phpnet/www.php.net/index.html" : base_path, url);
-        text = rp2350_vfs_read(path);
-        baseurl = path;
+        // url is root-relative e.g. "/cached.php?t=...&f=/styles/home.css"
+        // VFS stores files under /phpnet/www.php.net/ with query strings
+        // encoded as: '?' -> '__q_', '&'/'='/'/' -> percent-encoded.
+        std::string vfs_path = "/phpnet/www.php.net" + url_to_vfs_path(url);
+        text = rp2350_vfs_read(vfs_path);
+        baseurl = vfs_path;
     }
     void set_clip(const litehtml::position&, const litehtml::border_radiuses&) override {}
     void del_clip() override {}
@@ -138,24 +164,56 @@ public:
     }
 };
 
+static void litehtml_terminate_handler() {
+    printf("[litehtml] terminate\r\n");
+    fflush(stdout);
+    while (true) { __asm volatile("bkpt #0"); }
+}
+
+extern "C" void rp2350_render_arena_begin(void);
+extern "C" void rp2350_render_arena_end(void);
+
 extern "C" int rp2350_litehtml_render_tft(void) {
-    std::string path = "/phpnet/www.php.net/index.html";
-    std::string html = rp2350_vfs_read(path);
-    if (html.empty()) return -1;
-    rp2350_container cont;
-    cont.base_path = path;
-    rp2350_tft_fb_clear(0x07E0);
-    rp2350_tft_fb_fill_rect(0, 0, 32, 32, 0xF800);
-    litehtml::estring input(html, litehtml::encoding::utf_8, litehtml::confidence::certain);
-    auto doc = litehtml::document::createFromString(input, &cont, path);
-    if (!doc) return -2;
-    rp2350_tft_fb_fill_rect(32, 0, 32, 32, 0xFFE0);
-    doc->render(320);
-    rp2350_tft_fb_fill_rect(64, 0, 32, 32, 0x001F);
-    litehtml::position clip(0, 0, 320, 240);
-    doc->draw((litehtml::uint_ptr)1, 0, 0, &clip);
-    rp2350_tft_fb_fill_rect(96, 0, 32, 32, 0xFFFF);
-    rp2350_tft_fb_draw_text(8, 220, "litehtml", 8, 0xFFFF, 1, 1);
-    rp2350_tft_fb_render(0, 0);
+    auto prev_terminate = std::set_terminate(litehtml_terminate_handler);
+    rp2350_render_arena_begin();
+    try {
+        std::string path = "/phpnet/www.php.net/tft.html";
+        std::string html = rp2350_vfs_read(path);
+        if (html.empty()) { std::set_terminate(prev_terminate); return -1; }
+        rp2350_container cont;
+        cont.base_path = path;
+        rp2350_tft_fb_clear(0x07E0);
+        rp2350_tft_fb_fill_rect(0, 0, 32, 32, 0xF800);
+        printf("[litehtml] parsing %u bytes\r\n", (unsigned)html.size());
+        fflush(stdout);
+        litehtml::estring input(html, litehtml::encoding::utf_8, litehtml::confidence::certain);
+        auto doc = litehtml::document::createFromString(input, &cont, path);
+        if (!doc) { std::set_terminate(prev_terminate); return -2; }
+        printf("[litehtml] parsed ok, rendering\r\n"); fflush(stdout);
+        rp2350_tft_fb_fill_rect(32, 0, 32, 32, 0xFFE0);
+        doc->render(320);
+        printf("[litehtml] render ok, drawing\r\n"); fflush(stdout);
+        rp2350_tft_fb_fill_rect(64, 0, 32, 32, 0x001F);
+        litehtml::position clip(0, 0, 320, 240);
+        doc->draw((litehtml::uint_ptr)1, 0, 0, &clip);
+        printf("[litehtml] draw ok\r\n"); fflush(stdout);
+        rp2350_tft_fb_fill_rect(96, 0, 32, 32, 0xFFFF);
+        rp2350_tft_fb_draw_text(8, 220, "litehtml", 8, 0xFFFF, 1, 1);
+        rp2350_tft_fb_render(0, 0);
+    } catch (const std::exception& e) {
+        printf("[litehtml] exception: %s\r\n", e.what()); fflush(stdout);
+        rp2350_render_arena_end();
+        std::set_terminate(prev_terminate);
+        return -3;
+    } catch (...) {
+        printf("[litehtml] unknown exception\r\n"); fflush(stdout);
+        rp2350_render_arena_end();
+        std::set_terminate(prev_terminate);
+        return -4;
+    }
+    /* Note: intentionally do NOT call rp2350_render_arena_end() on success.
+     * The document tree lives in the arena and is still referenced by the
+     * TFT framebuffer pixels -- it will be reset on the next render call. */
+    std::set_terminate(prev_terminate);
     return 0;
 }
