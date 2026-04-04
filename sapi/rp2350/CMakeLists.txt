@@ -5,6 +5,7 @@ set(PICO_BOARD_HEADER_DIRS "${CMAKE_CURRENT_LIST_DIR}/boards" CACHE STRING "Cust
 set(PICO_PLATFORM "rp2350" CACHE STRING "Pico platform")
 set(RP2350_ENABLE_EPD ON CACHE BOOL "Enable Badger/EPD support")
 set(RP2350_ENABLE_TFT OFF CACHE BOOL "Enable Tufty/TFT support")
+set(RP2350_ENABLE_LITEHTML_TFT OFF CACHE BOOL "Enable experimental litehtml-to-TFT renderer")
 set(PICO_DEFAULT_UART "0" CACHE STRING "Default UART instance for stdio")
 set(PICO_DEFAULT_UART_TX_PIN "4" CACHE STRING "Default UART TX pin for stdio")
 set(PICO_DEFAULT_UART_RX_PIN "5" CACHE STRING "Default UART RX pin for stdio")
@@ -261,8 +262,22 @@ if(RP2350_ENABLE_TFT)
   )
 endif()
 
+set(RP2350_LITEHTML_TFT_SOURCES)
+set(RP2350_TFT_ONLY_SOURCES)
+if(RP2350_ENABLE_LITEHTML_TFT)
+  list(APPEND RP2350_LITEHTML_TFT_SOURCES
+    src/rp2350_litehtml_tft.cpp
+  )
+  list(APPEND RP2350_TFT_ONLY_SOURCES
+    rp2350_tft.cpp
+  )
+endif()
+
 file(GLOB RP2350_LITEHTML_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/*.cpp
+)
+list(REMOVE_ITEM RP2350_LITEHTML_SOURCES
+  ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/encodings.cpp
 )
 file(GLOB RP2350_GUMBO_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/*.c
@@ -283,6 +298,9 @@ add_executable(php_mcu_firmware
   src/rp2350_vfs_syscalls.c
   src/rp2350_ca_bundle.c
   src/rp2350_litehtml_stub.cpp
+  src/rp2350_litehtml_encodings_stub.cpp
+  src/rp2350_litehtml_tft.cpp
+  src/rp2350_preinit_alloc.cpp
   rp2350_rtc.c
   rp2350_powman.c
   ${RP2350_DISPLAY_SOURCES}
@@ -377,6 +395,8 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   HAVE_TIMELIB_CONFIG_H=1
   HAVE_LEXBOR=1
   HAVE_BUNDLED_PCRE=1
+  HAVE_JSON=1
+  HAVE_HASH_EXT=1
   PCRE2_CODE_UNIT_WIDTH=8
   LEXBOR_VERSION=\"2.5.0\"
   URI_ENABLE_ANSI=1
@@ -390,6 +410,7 @@ target_compile_definitions(php_mcu_firmware PRIVATE
   RP2350_WIFI_PASS=\"${RP2350_WIFI_PASS_ESC}\"
   RP2350_ENABLE_EPD=$<BOOL:${RP2350_ENABLE_EPD}>
   RP2350_ENABLE_TFT=$<BOOL:${RP2350_ENABLE_TFT}>
+  RP2350_ENABLE_LITEHTML_TFT=0
   # Keep SRAM .heap modest; newlib sbrk is redirected to a PSRAM window.
   PICO_HEAP_SIZE=16384
   LITEHTML_NO_THREADS=1
@@ -430,5 +451,64 @@ set_source_files_properties(
   ${RP2350_GUMBO_SOURCES}
   PROPERTIES COMPILE_OPTIONS "-include;gumbo_error_alias.h"
 )
+
+if(RP2350_ENABLE_LITEHTML_TFT)
+  add_executable(rp2350_litehtml_tft_test
+    src/rp2350_litehtml_tft_test.cpp
+    src/rp2350_litehtml_encodings_stub.cpp
+    ${RP2350_LITEHTML_TFT_SOURCES}
+    ${RP2350_TFT_ONLY_SOURCES}
+    ${RP2350_LITEHTML_SOURCES}
+    ${RP2350_GUMBO_SOURCES}
+  )
+  target_include_directories(rp2350_litehtml_tft_test PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
+    ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/include
+    ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/include/litehtml
+    ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src
+    ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo
+    ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/include
+    ${CMAKE_CURRENT_LIST_DIR}/third_party/litehtml/src/gumbo/include/gumbo
+  )
+  target_compile_definitions(rp2350_litehtml_tft_test PRIVATE
+    LITEHTML_NO_THREADS=1
+    RP2350_ENABLE_TFT=1
+    RP2350_ENABLE_LITEHTML_TFT=1
+    PICO_STACK_SIZE=1024
+    PICO_USE_STACK_GUARDS=0
+  )
+  target_compile_options(rp2350_litehtml_tft_test PRIVATE
+    -Os
+    $<$<COMPILE_LANGUAGE:CXX>:-fexceptions -frtti -fno-unwind-tables>
+  )
+  target_compile_options(pico_cxx_options INTERFACE
+    $<$<COMPILE_LANGUAGE:CXX>:-fexceptions -frtti>
+  )
+  set_source_files_properties(
+    ${RP2350_GUMBO_SOURCES}
+    PROPERTIES COMPILE_OPTIONS "-include;gumbo_error_alias.h"
+  )
+  target_link_libraries(rp2350_litehtml_tft_test
+    pico_stdlib
+    pico_cxx_options
+    hardware_gpio
+    hardware_pwm
+    hardware_dma
+    hardware_pio
+    hardware_clocks
+    pico_runtime
+    pico_runtime_init
+  )
+  target_link_options(rp2350_litehtml_tft_test PRIVATE
+    -Wl,--defsym=__StackBottom=0x20081100
+    -Wl,--defsym=__StackTop=0x20081400
+  )
+  pico_generate_pio_header(rp2350_litehtml_tft_test ${CMAKE_CURRENT_LIST_DIR}/st7789_parallel.pio)
+  pico_enable_stdio_usb(rp2350_litehtml_tft_test 0)
+  pico_enable_stdio_uart(rp2350_litehtml_tft_test 1)
+  pico_add_extra_outputs(rp2350_litehtml_tft_test)
+endif()
 
 pico_add_extra_outputs(php_mcu_firmware)

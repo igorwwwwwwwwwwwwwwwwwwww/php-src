@@ -296,7 +296,20 @@ x/16i $pc-16
 - Host-side php.net snapshot assets can be refreshed with:
   - `php sapi/rp2350/tools/phpnet_mirror.php https://www.php.net/ sapi/rp2350/fs/phpnet`
   - current mirrored snapshot is embedded under `/phpnet/www.php.net/...`
-- `third_party/litehtml/` is now vendored into the tree for an experimental on-device offline renderer path; current firmware wiring only proves the library set compiles and can see the embedded php.net snapshot through VFS.
+- `third_party/litehtml/` is now vendored into the tree for an experimental on-device renderer path.
+- The php.net snapshot mirror under `fs/phpnet/...` is the current deterministic input for renderer bring-up.
+- `src/rp2350_litehtml_encodings_stub.cpp` intentionally replaces litehtml's heavyweight encoding machinery with a tiny UTF-8-only path for RP2350 bring-up; this is acceptable for the current embedded php.net snapshot workflow but is not a general arbitrary-encoding solution.
+- There is an experimental standalone Tufty renderer target:
+  - enable with `-DRP2350_ENABLE_LITEHTML_TFT=ON -DPICO_BOARD=pimoroni_tufty2350 -DRP2350_ENABLE_TFT=ON`
+  - target name: `rp2350_litehtml_tft_test`
+  - it fits only after dropping litehtml's full encoding tables in favor of the UTF-8 stub
+- The main Tufty PHP firmware now also includes a native litehtml render hook exposed to PHP as `mcu_litehtml_render_phpnet_snapshot()`.
+- Button `B` in `main.php` now tries the native litehtml php.net snapshot renderer first and falls back to the older live-fetch text/snippet path if the native renderer returns nonzero.
+- **Important memory lesson:** for Tufty builds, disable the Badger/EPD path:
+  - use `-DRP2350_ENABLE_EPD=OFF`
+  - otherwise `third_party/ssd1680/ssd1680.cpp` drags in a ~191 KB `.uninitialized_data` block and needlessly blows SRAM on a TFT-only build
+- With `RP2350_ENABLE_EPD=OFF`, the full Tufty PHP firmware with the native litehtml hook and the usual bundled extensions fits again.
+- Extension trimming experiments (`json`, `hash`, `pcre`) were not the real memory lever; the dominant fix was excluding the unused EPD/ssd1680 side from Tufty builds.
 - `stream_open_function` and `resolve_path_function` are wired into Zend for this VFS path.
 - libc/newlib `_open()` is still a trap stub unless you implement a real filesystem backend.
 

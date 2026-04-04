@@ -35,7 +35,11 @@ PIO s_parallel_pio = pio1;
 uint s_parallel_sm = 0;
 uint s_parallel_offset = 0;
 int s_dma_channel = -1;
+#if RP2350_ENABLE_LITEHTML_TFT
+static uint8_t __attribute__((section(".uninitialized_data"))) s_fb[TFT_WIDTH * TFT_HEIGHT * 2];
+#else
 static uint8_t s_fb[TFT_WIDTH * TFT_HEIGHT * 2];
+#endif
 
 static inline void cs_select() {
   gpio_put(PIN_LCD_CS, 0);

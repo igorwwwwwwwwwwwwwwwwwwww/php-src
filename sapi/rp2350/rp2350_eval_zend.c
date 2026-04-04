@@ -204,6 +204,7 @@ ZEND_FUNCTION(mcu_tft_fb_fill_rect);
 ZEND_FUNCTION(mcu_tft_fb_set_pixel);
 ZEND_FUNCTION(mcu_tft_fb_draw_text);
 ZEND_FUNCTION(mcu_tft_fb_render);
+ZEND_FUNCTION(mcu_litehtml_render_phpnet_snapshot);
 ZEND_FUNCTION(mcu_battery_voltage);
 ZEND_FUNCTION(mcu_battery_mv);
 ZEND_FUNCTION(mcu_usb_connected);
@@ -329,6 +330,9 @@ ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_tft_fb_render, 0, 0, _IS_BOO
 	ZEND_ARG_TYPE_INFO(0, y, IS_LONG, 1)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_litehtml_render_phpnet_snapshot, 0, 0, IS_LONG, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_battery_voltage, 0, 0, IS_DOUBLE, 0)
 ZEND_END_ARG_INFO()
 
@@ -417,6 +421,7 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_tft_fb_set_pixel, arginfo_mcu_tft_fb_set_pixel)
 	ZEND_FE(mcu_tft_fb_draw_text, arginfo_mcu_tft_fb_draw_text)
 	ZEND_FE(mcu_tft_fb_render, arginfo_mcu_tft_fb_render)
+	ZEND_FE(mcu_litehtml_render_phpnet_snapshot, arginfo_mcu_litehtml_render_phpnet_snapshot)
 #endif
 	ZEND_FE(mcu_battery_voltage, arginfo_mcu_battery_voltage)
 	ZEND_FE(mcu_battery_mv, arginfo_mcu_battery_mv)
@@ -1057,6 +1062,14 @@ ZEND_FUNCTION(mcu_tft_fb_render)
 	ZEND_PARSE_PARAMETERS_END();
 
 	RETURN_BOOL(rp2350_tft_fb_render((int)x, (int)y));
+}
+
+extern int rp2350_litehtml_render_tft(void);
+
+ZEND_FUNCTION(mcu_litehtml_render_phpnet_snapshot)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	RETURN_LONG(rp2350_litehtml_render_tft());
 }
 #endif
 
