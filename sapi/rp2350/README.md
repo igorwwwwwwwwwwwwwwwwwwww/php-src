@@ -278,9 +278,15 @@ Allocator notes:
     - Current `mcu_button_wait()` is semaphore+IRQ wake with timeout and works for responsiveness.
     - Revisit precise 1 Hz scheduling strategy (the prior `hrtime`/deadline variant caused stalls on target).
     - Add low-level button IRQ diagnostics (`irq count`, `wake count`, `timeout count`) to aid tuning.
-  - Make EPD updates non-blocking:
-    - Explore async e-ink refresh pipeline to avoid blocking PHP execution during render/update.
-    - If async is too invasive, evaluate running EPD work on the second RP2350 core with safe handoff/synchronization.
+  - Explore multicore/PIO architecture more deliberately:
+    - Current firmware logic is effectively single-core for application/runtime work; keep core 0 as the owner of PHP/Zend, Wi-Fi/lwIP, and main control flow unless/until a stricter model is defined.
+    - Evaluate core 1 as a worker for clearly isolated jobs such as display flush/render tasks, framebuffer composition, sensor/background sampling, or other queue-driven jobs that do not call into Zend from both cores.
+    - Document shared-state rules before using both cores more aggressively (ownership of USB/TinyUSB, CYW43/lwIP, display drivers, IRQ-facing state, and any cross-core queues/mailboxes).
+    - Avoid treating Zend/PHP runtime state as multicore-safe without an explicit serialization model.
+  - Extend PIO-assisted display ideas:
+    - The Tufty TFT path already benefits from PIO/DMA transport; explore async flush queues, double buffering, and tighter separation between framebuffer production and panel transfer.
+    - Consider whether PIO + DMA + a core-1 render/flush worker gives a cleaner architecture for high-refresh Tufty UI work.
+    - For EPD, evaluate whether a queued render/update pipeline or a core-1 worker meaningfully reduces stalls without making wake/sleep sequencing fragile.
   - Add deep-sleep lifecycle:
     - Add a controlled deep-sleep path with explicit peripheral bring-down before sleep and deterministic bring-up after wake.
     - Define/validate re-init ordering for critical blocks (UART, Wi-Fi/CYW43, PSRAM/QMI, EPD, ADC, timers/IRQs) to avoid wake-time hangs.
@@ -291,6 +297,11 @@ Allocator notes:
   - Add fallback servers and optional DHCP-provided NTP server handling.
 - Network diagnostics baseline:
   - Add a simple smoke check (or runtime counter) so ICMP/ICMPv6 responsiveness regressions are visible during bring-up.
+- Web-facing experiments:
+  - Explore a tiny on-device webserver first (for example a status page and/or JSON API exposing battery, Wi-Fi state, light sensor, button state, and display mode), since that is a more realistic near-term fit for RP2350 resources than a browser-like client.
+  - If serving HTTP from the device, define a minimal ownership model for request handling versus the existing PHP runtime/event loop so networking and UI work do not block each other unpredictably.
+  - Treat a browser-style client as experimental only; a realistic first step is fetching very small HTTP/HTTPS resources or a preprocessed endpoint rather than attempting to render arbitrary modern pages directly on-device.
+  - If pulling selected content from php.net or similar sites, prefer a tiny proxy/adapter service that reduces remote content to a compact MCU-friendly response instead of parsing full pages on the RP2350.
 - Add mDNS support:
   - Evaluate lwIP mDNS responder/client integration for device discovery on local networks.
   - Define minimal RP2350 surface (hostname announce + lookup) and a basic smoke test (`*.local` resolution).
