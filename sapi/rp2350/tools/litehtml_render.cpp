@@ -1,9 +1,9 @@
 #include <litehtml.h>
-#include "/tmp/litehtml/containers/cairo/container_cairo_pango.h"
-#include "/tmp/litehtml/containers/cairo/cairo_images_cache.h"
+#include "litehtml_cairo/container_cairo_pango.h"
+#include "litehtml_cairo/cairo_images_cache.h"
 #include <cairo.h>
 #define STB_IMAGE_IMPLEMENTATION
-#include "/tmp/stb/stb_image.h"
+#include "third_party/stb/stb_image.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
