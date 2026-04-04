@@ -34,4 +34,16 @@ void rp2350_sntp_set_system_time_us(uint32_t sec, uint32_t us);
 #define PBUF_POOL_SIZE              64
 #define MEMP_NUM_TCP_SEG            64
 
+/* httpd */
+#define LWIP_HTTPD                  1
+#define LWIP_HTTPD_CUSTOM_FILES     1
+#define LWIP_HTTPD_DYNAMIC_HEADERS  1
+#define LWIP_HTTPD_DYNAMIC_FILE_READ 1
+#define HTTPD_SERVER_AGENT          "php-mcu/1"
+#define LWIP_HTTPD_MAX_REQUEST_URI_LEN 256
+
+/* TCP PCB pool -- default 5 is too small once httpd + outbound conns coexist */
+#define MEMP_NUM_TCP_PCB            16
+#define MEMP_NUM_TCP_PCB_LISTEN     4
+
 #endif /* _LWIPOPTS_H */

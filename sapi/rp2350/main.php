@@ -413,6 +413,7 @@ $next_redraw_at = 0.0;
 $next_log_s = time() + 1;
 
 while (true) {
+    mcu_httpd_poll();
     $now_s = time();
     $remaining_ms = ($next_log_s - $now_s) * 1000;
     if ($remaining_ms <= 0) {
@@ -458,6 +459,8 @@ while (true) {
             print " ip6:";
             print is_string($wifi_ip6) ? $wifi_ip6 : "none";
             print "\n";
+
+            mcu_httpd_init();
 
             $ntp_ok = mcu_ntp_sync('pool.ntp.org', 10000);
             print "ntp:ok:";

@@ -273,6 +273,7 @@ add_executable(php_mcu_firmware
   src/rp2350_wifi.c
   src/rp2350_vfs_syscalls.c
   src/rp2350_ca_bundle.c
+  src/rp2350_httpd.c
   rp2350_rtc.c
   rp2350_powman.c
   ${RP2350_DISPLAY_SOURCES}
@@ -384,6 +385,7 @@ target_link_libraries(php_mcu_firmware
   pico_cyw43_arch_lwip_threadsafe_background
   pico_mbedtls
   pico_lwip_mbedtls
+  pico_lwip_http
   hardware_adc
   hardware_gpio
   hardware_i2c

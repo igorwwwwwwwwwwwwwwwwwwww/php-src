@@ -9,6 +9,7 @@ int rp2350_eval_startup(void);
 int rp2350_eval_execute(const char *code, size_t len);
 int rp2350_eval_execute_file(const char *path);
 const char *rp2350_eval_last_error(void);
+char *rp2350_eval_capture_string(const char *code, size_t *out_len);
 bool rp2350_net_tcp_request(
 	const char *host,
 	uint16_t port,

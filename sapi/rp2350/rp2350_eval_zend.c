@@ -54,6 +54,7 @@
 #include "rp2350_epd.h"
 #include "rp2350_tft.h"
 #include "rp2350_powman.h"
+#include "rp2350_httpd.h"
 #include "rp2350_psram.h"
 #include "rp2350_rtc.h"
 #include "rp2350_transport.h"
@@ -212,6 +213,8 @@ ZEND_FUNCTION(mcu_battery_raw_vref);
 ZEND_FUNCTION(mcu_light_raw);
 ZEND_FUNCTION(mcu_light_level);
 ZEND_FUNCTION(mcu_sleep);
+ZEND_FUNCTION(mcu_httpd_poll);
+ZEND_FUNCTION(mcu_httpd_init);
 ZEND_FUNCTION(mcu_shipping_mode);
 ZEND_FUNCTION(mcu_wake_reason);
 ZEND_FUNCTION(mcu_wifi_init);
@@ -350,6 +353,12 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_light_level, 0, 0, IS_LONG, 0)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_httpd_poll, 0, 0, IS_VOID, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_httpd_init, 0, 0, IS_VOID, 0)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_mcu_sleep, 0, 0, _IS_BOOL, 0)
 ZEND_END_ARG_INFO()
 
@@ -426,6 +435,8 @@ static const zend_function_entry rp2350_mcu_functions[] = {
 	ZEND_FE(mcu_light_raw, arginfo_mcu_light_raw)
 	ZEND_FE(mcu_light_level, arginfo_mcu_light_level)
 	ZEND_FE(mcu_sleep, arginfo_mcu_sleep)
+	ZEND_FE(mcu_httpd_poll, arginfo_mcu_httpd_poll)
+	ZEND_FE(mcu_httpd_init, arginfo_mcu_httpd_init)
 	ZEND_FE(mcu_shipping_mode, arginfo_mcu_shipping_mode)
 	ZEND_FE(mcu_wake_reason, arginfo_mcu_wake_reason)
 	ZEND_FE(mcu_wifi_init, arginfo_mcu_wifi_init)
@@ -1193,6 +1204,18 @@ ZEND_FUNCTION(mcu_sleep)
 	RETURN_BOOL(rc == PICO_OK);
 }
 
+ZEND_FUNCTION(mcu_httpd_poll)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_httpd_poll();
+}
+
+ZEND_FUNCTION(mcu_httpd_init)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	rp2350_httpd_init();
+}
+
 ZEND_FUNCTION(mcu_shipping_mode)
 {
 	int rc;
@@ -1943,6 +1966,47 @@ int rp2350_eval_execute(const char *code, size_t len)
 
 	rp2350_eval_error = "ok";
 	return 0;
+}
+
+/*
+ * Execute a PHP code string, capture all output into a malloc'd buffer.
+ * Caller must free() the returned pointer. Returns NULL on failure.
+ * *out_len is set to the number of bytes in the returned buffer.
+ */
+char *rp2350_eval_capture_string(const char *code, size_t *out_len)
+{
+	if (out_len) *out_len = 0;
+	if (!code) return NULL;
+
+	/* start output buffer */
+	php_output_start_user(NULL, 0, PHP_OUTPUT_HANDLER_STDFLAGS);
+
+	zend_eval_stringl((char *)code, strlen(code), NULL, "rp2350_capture");
+	if (EG(exception)) {
+		(void)zend_exception_error(EG(exception), E_WARNING);
+		zend_clear_exception();
+	}
+
+	/* get buffered output */
+	zval zbuf;
+	ZVAL_UNDEF(&zbuf);
+	php_output_get_contents(&zbuf);
+	php_output_discard();
+
+	if (Z_TYPE(zbuf) != IS_STRING) {
+		zval_ptr_dtor(&zbuf);
+		return NULL;
+	}
+
+	size_t len = Z_STRLEN(zbuf);
+	char *out = (char *)malloc(len + 1);
+	if (out) {
+		memcpy(out, Z_STRVAL(zbuf), len);
+		out[len] = '\0';
+		if (out_len) *out_len = len;
+	}
+	zval_ptr_dtor(&zbuf);
+	return out;
 }
 
 const char *rp2350_eval_last_error(void)

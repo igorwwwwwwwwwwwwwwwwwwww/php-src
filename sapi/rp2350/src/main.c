@@ -12,6 +12,7 @@
 #include "rp2350_psram.h"
 #include "rp2350_rtc.h"
 #include "rp2350_transport.h"
+#include "rp2350_httpd.h"
 
 static void log_line(const char *line)
 {
