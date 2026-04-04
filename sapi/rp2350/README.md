@@ -86,101 +86,14 @@ A separate Clang comparison build for RP2350/Tufty 2350 now works in:
 
 Working configure/build command:
 
-```bash
-cmake -G Ninja -S sapi/rp2350 -B sapi/rp2350/build_tufty2350_clang \
-  -DPICO_BOARD=pimoroni_tufty2350 \
-  -DRP2350_ENABLE_EPD=OFF \
-  -DRP2350_ENABLE_TFT=ON \
-  -DPICO_COMPILER=pico_arm_clang \
-  -DPICO_TOOLCHAIN_PATH=/Applications/ATfE-21.1.1-Darwin-universal/bin
+The GCC build remains the only documented/known-good path on the clean committed branch.
 
-cmake --build sapi/rp2350/build_tufty2350_clang -j4
-```
+Notes:
 
-Produced artifacts:
-
-- `sapi/rp2350/build_tufty2350_clang/php_mcu_firmware.elf`
-- `sapi/rp2350/build_tufty2350_clang/php_mcu_firmware.uf2`
-- `sapi/rp2350/build_tufty2350_clang/php_mcu_firmware.bin`
-- `sapi/rp2350/build_tufty2350_clang/php_mcu_firmware.hex`
-
-What we learned getting Clang working:
-
-- The current Pico SDK Clang support was close, but not directly compatible with the installed ATfE 21.1.1 runtime layout.
-- ATfE uses different runtime directory names/layout than the older Pico Clang integration expected.
-- It was necessary to patch the local Pico SDK toolchain files to:
-  - accept newer ATfE runtime directory names
-  - find headers under `arm-none-eabi/include`
-  - find libraries/startup objects under the per-runtime `lib/` directory
-- CMake compiler detection was failing mainly because runtime/startup flags were being injected too early and duplicated during try-compile.
-- The fix was to stop forcing the heavy runtime/startup link inputs globally for all CMake compiler tests, and instead add them only to the final firmware target link.
-- After that, ordinary source compatibility issues were mostly manageable and no longer the main blocker.
-
-Repo/source compatibility fixes that were needed for Clang + picolibc:
-
-- Pico SDK `__printflike` handling needed a GCC/Clang attribute fallback.
-- Pico SDK `__wfe` / `__sev` use sites needed Clang-safe handling.
-- `rp2350_sbrk_psram.c` needed to tolerate picolibc environments without `<reent.h>`.
-- `main/streams/cast.c` needed `funopen` callback signatures adjusted for this libc/sysroot.
-- `rp2350_posix_compat.h` / `rp2350_posix_stubs.c` needed broader POSIX/syscall coverage for the Clang+picolibc link path.
-
-Link/runtime-specific lessons:
-
-- Once the try-compile/runtime duplication problem was fixed, the build progressed through normal compilation and final link.
-- Explicit final-link control was needed to use the ATfE runtime cleanly.
-- A small RAM `.got` section then appeared in the Clang-linked ELF; picotool rejected the ELF-to-UF2 conversion with:
-  - `ERROR: ELF contains memory contents for uninitialized memory at 0x20001b08`
-- The practical fix was to fold `.got*` into `.data` in the RP2350 linker script so the resulting ELF matched picotool's expectations for initialized RAM content.
-
-Current caveats:
-
-- This Clang path is still using local patches in the vendored Pico SDK and a few repo sources.
-- The working GCC build remains the default/known-good baseline.
-- Clang still emits some harmless compile-stage warnings about link-only options such as:
-  - `-rtlib=compiler-rt`
-  - `-unwindlib=none`
-- The Clang build is now past the "toolchain does not work" stage, but it still needs runtime validation on hardware before treating it as equivalent to the GCC firmware.
-
-Patch inventory for the current working Clang build:
-
-Repo sources:
-- `main/streams/cast.c`
-- `sapi/rp2350/CMakeLists.txt`
-- `sapi/rp2350/include/rp2350_posix_compat.h`
-- `sapi/rp2350/rp2350_posix_stubs.c`
-- `sapi/rp2350/rp2350_sbrk_psram.c`
-
-Vendored Pico SDK:
-- `sapi/rp2350/third_party/pico-sdk/cmake/preload/toolchains/pico_arm_cortex_m33_clang.cmake`
-- `sapi/rp2350/third_party/pico-sdk/cmake/preload/toolchains/util/pico_arm_clang_common.cmake`
-- `sapi/rp2350/third_party/pico-sdk/src/common/pico_sync/include/pico/lock_core.h`
-- `sapi/rp2350/third_party/pico-sdk/src/common/pico_time/time.c`
-- `sapi/rp2350/third_party/pico-sdk/src/rp2_common/pico_crt0/rp2350/memmap_default.ld`
-- `sapi/rp2350/third_party/pico-sdk/src/rp2_common/pico_platform_compiler/include/pico/platform/compiler.h`
-
-GCC vs Clang binary comparison (Tufty 2350 build):
-
-| Metric | GCC (`build_tufty2350`) | Clang (`build_tufty2350_clang`) | Notes |
-|---|---:|---:|---|
-| `size` text | 5,574,472 | 5,617,084 | Clang is +42,612 bytes |
-| `size` data | 0 | 8 | Clang carries a tiny TLS/data footprint |
-| `size` bss | 344,900 | 344,388 | Clang is slightly smaller in BSS |
-| `size` total | 5,919,372 | 5,961,480 | Clang is +42,108 bytes total |
-| `.text` section | 2,373,064 | 2,471,352 | Clang generates more code |
-| `.rodata` section | 3,167,732 | 3,120,640 | Clang uses slightly less rodata |
-| `.data` section | 15,048 | 6,592 | Clang RAM-init data is smaller |
-| `.ARM.exidx` | 144 | 16 | Clang unwind index is smaller |
-| ELF file size | ~28 MB | ~19 MB | mostly debug-info/layout differences |
-| BIN file size | ~5.3 MB | ~5.3 MB | deployable image size is close |
-| UF2 file size | ~11 MB | ~11 MB | deployable image size is close |
-
-Notable binary/layout differences:
-
-- The deployable Clang image is valid and close in size to the GCC image, but not bit-identical.
-- Clang currently produces a somewhat larger overall firmware image (~42 KB by `size`).
-- Clang+picolibc introduces TLS-related ELF sections/segments (`.tdata`, `.tbss`, TLS program header) and `GNU_RELRO`.
-- The Clang-linked ELF originally emitted a small RAM `.got` section that picotool rejected during UF2 generation; folding `.got*` into `.data` in the RP2350 linker script fixed that.
-- The much smaller Clang ELF on disk is mainly a debug-info/layout difference, not a sign of a much smaller firmware payload.
+- The Tufty 2350 GCC build from clean committed `HEAD` is the control image and the expected baseline for hardware validation.
+- There was substantial local experimentation around a Clang/ATfE bring-up path, but that work depended on uncommitted repo changes and local vendored Pico SDK patches. It is not part of the clean documented build flow.
+- Some of those local Clang experiments got as far as producing a UF2, but they were not stable enough to document here as a supported workflow.
+- Practical lesson: keep the GCC build as the baseline and isolate compiler/toolchain experiments on a separate branch.
 
 ## Flash
 
