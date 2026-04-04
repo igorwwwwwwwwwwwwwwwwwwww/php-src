@@ -6,7 +6,6 @@
 #include "rp2350_psram.h"
 #include "rp2350_psram_layout.h"
 
-/* PSRAM heap -- used once PSRAM is initialised. */
 static uint8_t *s_heap_base = NULL;
 static ptrdiff_t s_heap_brk = 0;
 

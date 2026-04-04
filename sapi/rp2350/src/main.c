@@ -13,8 +13,6 @@
 #include "rp2350_rtc.h"
 #include "rp2350_transport.h"
 
-extern void rp2350_preinit_alloc_psram_ready(void);
-
 static void log_line(const char *line)
 {
 	rp2350_platform_write(line, strlen(line));
@@ -46,8 +44,6 @@ int main(void)
 		| M33_SHCSR_USGFAULTENA_BITS;
 
 	if (!rp2350_psram_init(BW_PSRAM_CS)) {
-		/* PSRAM failed -- preinit allocator stays in arena mode, which
-		 * is fine since we halt immediately below. */
 		stdio_init_all();
 		maybe_wait_for_usb_serial();
 		sleep_ms(300);
@@ -67,7 +63,6 @@ int main(void)
 	snprintf(build_line, sizeof(build_line), "[boot] build %s %s\r\n", __DATE__, __TIME__);
 	log_line(build_line);
 	log_line("[boot] psram init OK\r\n");
-	rp2350_preinit_alloc_psram_ready();
 	if (rp2350_rtc_sync_system_time()) {
 		log_line("[boot] rtc sync OK\r\n");
 	} else {

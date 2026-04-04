@@ -565,46 +565,36 @@ while (true) {
             print "mode:logo\n";
         }
         if ($b_down && !$b_was_down) {
-            print "web:render:litehtml\n";
-            $rc = mcu_litehtml_render_phpnet_snapshot();
-            print "web:render:litehtml:rc:";
-            print $rc;
+            $url = 'https://www.php.net/';
+            $ctx = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => 10.0,
+                    'header' => "User-Agent: rp2350-php/1\r\nAccept: text/html,*/*\r\nConnection: close\r\n",
+                ],
+            ]);
+            print "web:fetch:url:";
+            print $url;
             print "\n";
-            if ($rc === 0) {
-                $page = 'web';
-                $needs_redraw = false;
-            } elseif ($rc !== 0) {
-                $url = 'https://www.php.net/';
-                $ctx = stream_context_create([
-                    'http' => [
-                        'method' => 'GET',
-                        'timeout' => 10.0,
-                        'header' => "User-Agent: rp2350-php/1\r\nAccept: text/html,*/*\r\nConnection: close\r\n",
-                    ],
-                ]);
-                print "web:fetch:url:";
-                print $url;
-                print "\n";
-                $body = @file_get_contents($url, false, $ctx);
-                if ($body === false) {
-                    print "web:php.net:fail\n";
-                } else {
-                    $head = substr($body, 0, 64);
-                    $head = str_replace(["\r", "\n", "\t"], ' ', $head);
-                    while (strpos($head, '  ') !== false) {
-                        $head = str_replace('  ', ' ', $head);
-                    }
-                    print "web:php.net:ok len:";
-                    print strlen($body);
-                    print " head:";
-                    print $head;
-                    print "\n";
-                    $web_body = $body;
-                    $web_source = 'live';
-                    $page = 'web';
-                    set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body, $web_source);
-                    $needs_redraw = false;
+            $body = @file_get_contents($url, false, $ctx);
+            if ($body === false) {
+                print "web:php.net:fail\n";
+            } else {
+                $head = substr($body, 0, 64);
+                $head = str_replace(["\r", "\n", "\t"], ' ', $head);
+                while (strpos($head, '  ') !== false) {
+                    $head = str_replace('  ', ' ', $head);
                 }
+                print "web:php.net:ok len:";
+                print strlen($body);
+                print " head:";
+                print $head;
+                print "\n";
+                $web_body = $body;
+                $web_source = 'live';
+                $page = 'web';
+                set_page($page, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, $web_body, $web_source);
+                $needs_redraw = false;
             }
         }
 
