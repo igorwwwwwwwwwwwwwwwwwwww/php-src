@@ -3,13 +3,12 @@
 
 #include <litehtml.h>
 #include "container_cairo.h"
-#include "text_backend_pango.h"
+#include "text_backend_stb.h"
 #include <cairo.h>
-#include <memory>
 
 class container_cairo_pango : public container_cairo
 {
-	std::unique_ptr<litehtml_text_backend> m_backend;
+	stb_text_backend m_backend;
 public:
 	container_cairo_pango();
 	~container_cairo_pango() override;
