@@ -68,9 +68,11 @@ int fs_open_custom(struct fs_file *file, const char *name)
         return 1;
     }
 
-    /* run PHP synchronously -- safe because CYW43 callbacks are cooperative */
+    /* run PHP synchronously with HTML mode enabled -- safe because CYW43
+     * callbacks are cooperative (same thread as main). html_errors and
+     * phpinfo_as_text are flipped for the duration and restored after. */
     size_t body_len = 0;
-    char *body = rp2350_eval_capture_string("phpinfo();", &body_len);
+    char *body = rp2350_eval_web_request("phpinfo();", &body_len);
 
     int hdr = snprintf(s_resp_buf, sizeof(s_resp_buf),
         "HTTP/1.0 200 OK\r\n"

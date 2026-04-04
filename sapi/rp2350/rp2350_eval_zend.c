@@ -1981,7 +1981,12 @@ char *rp2350_eval_capture_string(const char *code, size_t *out_len)
 	/* start output buffer */
 	php_output_start_user(NULL, 0, PHP_OUTPUT_HANDLER_STDFLAGS);
 
-	zend_eval_stringl((char *)code, strlen(code), NULL, "rp2350_capture");
+	zend_try {
+		zend_eval_stringl((char *)code, strlen(code), NULL, "rp2350_capture");
+	} zend_catch {
+		/* exit()/die() -- output so far is still valid */
+	} zend_end_try();
+
 	if (EG(exception)) {
 		(void)zend_exception_error(EG(exception), E_WARNING);
 		zend_clear_exception();
@@ -1992,6 +1997,76 @@ char *rp2350_eval_capture_string(const char *code, size_t *out_len)
 	ZVAL_UNDEF(&zbuf);
 	php_output_get_contents(&zbuf);
 	php_output_discard();
+
+	if (Z_TYPE(zbuf) != IS_STRING) {
+		zval_ptr_dtor(&zbuf);
+		return NULL;
+	}
+
+	size_t len = Z_STRLEN(zbuf);
+	char *out = (char *)malloc(len + 1);
+	if (out) {
+		memcpy(out, Z_STRVAL(zbuf), len);
+		out[len] = '\0';
+		if (out_len) *out_len = len;
+	}
+	zval_ptr_dtor(&zbuf);
+	return out;
+}
+
+/*
+ * Execute PHP code as a web request:
+ * - html_errors=1, phpinfo_as_text=0 (HTML output)
+ * - output captured and returned as malloc'd buffer
+ * - all settings restored after the call
+ */
+char *rp2350_eval_web_request(const char *code, size_t *out_len)
+{
+	if (out_len) *out_len = 0;
+	if (!code) return NULL;
+
+	/* save state */
+	int saved_phpinfo_as_text = sapi_module.phpinfo_as_text;
+	int saved_html_errors     = PG(html_errors);
+	int saved_display_errors  = PG(display_errors);
+
+	/* flip to HTML web mode */
+	sapi_module.phpinfo_as_text = 0;
+	PG(html_errors)    = 1;
+	PG(display_errors) = PHP_DISPLAY_ERRORS_STDOUT;
+
+	zend_string *zs_html_errors = zend_string_init("html_errors", sizeof("html_errors") - 1, 0);
+	zend_alter_ini_entry_chars(zs_html_errors, "1", 1, PHP_INI_USER, PHP_INI_STAGE_RUNTIME);
+	zend_string_release(zs_html_errors);
+
+	/* capture output -- wrap in zend_try so exit()/die() is caught */
+	php_output_start_user(NULL, 0, PHP_OUTPUT_HANDLER_STDFLAGS);
+
+	zend_try {
+		zend_eval_stringl((char *)code, strlen(code), NULL, "rp2350_web");
+	} zend_catch {
+		/* exit()/die() lands here -- output so far is still valid */
+	} zend_end_try();
+
+	if (EG(exception)) {
+		(void)zend_exception_error(EG(exception), E_WARNING);
+		zend_clear_exception();
+	}
+
+	zval zbuf;
+	ZVAL_UNDEF(&zbuf);
+	php_output_get_contents(&zbuf);
+	php_output_discard();
+
+	/* restore state */
+	sapi_module.phpinfo_as_text = saved_phpinfo_as_text;
+	PG(html_errors)    = saved_html_errors;
+	PG(display_errors) = saved_display_errors;
+
+	zs_html_errors = zend_string_init("html_errors", sizeof("html_errors") - 1, 0);
+	zend_alter_ini_entry_chars(zs_html_errors,
+		saved_html_errors ? "1" : "0", 1, PHP_INI_USER, PHP_INI_STAGE_RUNTIME);
+	zend_string_release(zs_html_errors);
 
 	if (Z_TYPE(zbuf) != IS_STRING) {
 		zval_ptr_dtor(&zbuf);
