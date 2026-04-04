@@ -63,20 +63,20 @@ PHP as an embedded firmware runtime on the RP2350. Target board: **Pimoroni Badg
 ./sapi/rp2350/fetch-deps.sh
 
 # Configure
-cmake -S sapi/rp2350 -B sapi/rp2350/build_badger -DPICO_BOARD=pimoroni_badger2350
+cmake -S sapi/rp2350 -B sapi/rp2350/build_badger2350 -DPICO_BOARD=pimoroni_badger2350
 
 # Optional: set USB-serial wait window before boot logs (default: 10000ms)
-cmake -S sapi/rp2350 -B sapi/rp2350/build_badger \
+cmake -S sapi/rp2350 -B sapi/rp2350/build_badger2350 \
   -DPICO_BOARD=pimoroni_badger2350 \
   -DRP2350_WAIT_FOR_USB_SERIAL_MS=10000
 
 # Build
-cmake --build sapi/rp2350/build_badger -j
+cmake --build sapi/rp2350/build_badger2350 -j
 ```
 
 Artifacts:
-- `sapi/rp2350/build_badger/php_mcu_firmware.uf2`
-- `sapi/rp2350/build_badger/php_mcu_firmware.elf`
+- `sapi/rp2350/build_badger2350/php_mcu_firmware.uf2`
+- `sapi/rp2350/build_badger2350/php_mcu_firmware.elf`
 
 ## Clang / Arm Toolchain for Embedded (ATfE) status
 
@@ -100,19 +100,19 @@ Notes:
 BOOTSEL mass-storage:
 
 ```bash
-cp sapi/rp2350/build_badger/php_mcu_firmware.uf2 /Volumes/RP2350/
+cp sapi/rp2350/build_badger2350/php_mcu_firmware.uf2 /Volumes/RP2350/
 ```
 
 `picotool` (requires board visible in BOOTSEL mode):
 
 ```bash
-picotool load -x sapi/rp2350/build_badger/php_mcu_firmware.uf2 -f
+picotool load -x sapi/rp2350/build_badger2350/php_mcu_firmware.uf2 -f
 ```
 
 Absolute-path variant:
 
 ```bash
-picotool load -x /Users/igor/code/php-src/sapi/rp2350/build_badger/php_mcu_firmware.uf2 -f
+picotool load -x /Users/igor/code/php-src/sapi/rp2350/build_badger2350/php_mcu_firmware.uf2 -f
 ```
 
 ## Serial output
@@ -128,8 +128,8 @@ If PHP execution fails and you see repeated `[halt] php main: ...`, the halt lin
 ## Fast dev loop
 
 ```bash
-cmake --build sapi/rp2350/build_badger -j8
-picotool load -x /Users/igor/code/php-src/sapi/rp2350/build_badger/php_mcu_firmware.uf2 -f
+cmake --build sapi/rp2350/build_badger2350 -j8
+picotool load -x /Users/igor/code/php-src/sapi/rp2350/build_badger2350/php_mcu_firmware.uf2 -f
 picocom -b 115200 --imap lfcrlf /dev/cu.usbmodem101
 ```
 
@@ -208,7 +208,7 @@ Connect with GDB:
 
 ```bash
 arm-none-eabi-gdb -q \
-  -ex "file /Users/igor/code/php-src/sapi/rp2350/build_badger/php_mcu_firmware.elf" \
+  -ex "file /Users/igor/code/php-src/sapi/rp2350/build_badger2350/php_mcu_firmware.elf" \
   -ex "target extended-remote :3333" \
   -ex "target extended-remote :3333"
 ```
@@ -263,7 +263,7 @@ Allocator notes:
 
 ## Known-good now
 
-- Build from `sapi/rp2350/build_badger`
+- Build from `sapi/rp2350/build_badger2350`
 - Flash with `picotool` or `/Volumes/RP2350`
 - UART shows firmware boot lines and script output (`tick` loop)
 
