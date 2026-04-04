@@ -890,6 +890,50 @@ static ssize_t rp2350_http_stream_write(php_stream *stream, const char *buf, siz
 	return -1;
 }
 
+static bool rp2350_http_stream_h2_pump(rp2350_http_stream_data_t *st, absolute_time_t deadline)
+{
+	ssize_t parsed = 0;
+	size_t rx_len = 0;
+	int rc;
+
+	if (!st || st->mode != RP2350_HTTP_STREAM_MODE_H2) {
+		return false;
+	}
+
+	cyw43_arch_lwip_begin();
+	rx_len = st->net.rx_len;
+	if (rx_len > 0) {
+		parsed = nghttp2_session_mem_recv(
+			st->h2_session,
+			(const uint8_t *)st->net.rx,
+			st->net.rx_len
+		);
+		if (parsed >= 0) {
+			size_t used = (size_t)parsed;
+			(void)used;
+			if (used < st->net.rx_len) {
+				memmove(st->net.rx, st->net.rx + used, st->net.rx_len - used);
+			}
+			st->net.rx_len -= used;
+		}
+	}
+	cyw43_arch_lwip_end();
+
+	if (parsed < 0) {
+		return false;
+	}
+	if (parsed > 0) {
+		rc = nghttp2_session_send(st->h2_session);
+		if (rc != 0) {
+			return false;
+		}
+		if (!rp2350_h2_flush_tx(&st->h2, &st->net, deadline)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 static ssize_t rp2350_http_stream_read(php_stream *stream, char *buf, size_t count)
 {
 	rp2350_http_stream_data_t *st = (rp2350_http_stream_data_t *)stream->abstract;
@@ -902,10 +946,11 @@ static ssize_t rp2350_http_stream_read(php_stream *stream, char *buf, size_t cou
 	deadline = make_timeout_time_ms(st->timeout_ms);
 
 	if (st->mode == RP2350_HTTP_STREAM_MODE_H2) {
+		absolute_time_t idle_deadline = make_timeout_time_ms(st->timeout_ms);
+		absolute_time_t hard_deadline = make_timeout_time_ms(st->timeout_ms * 4U);
 		while (true) {
 			bool done = false;
 			bool had_error = false;
-			ssize_t parsed = 0;
 
 			if (st->h2.body_len > 0) {
 				size_t take = (count < st->h2.body_len) ? count : st->h2.body_len;
@@ -924,27 +969,17 @@ static ssize_t rp2350_http_stream_read(php_stream *stream, char *buf, size_t cou
 			cyw43_arch_lwip_begin();
 			done = st->net.done;
 			had_error = st->net.had_error;
-			if (st->net.rx_len > 0) {
-				parsed = nghttp2_session_mem_recv(
-					st->h2_session,
-					(const uint8_t *)st->net.rx,
-					st->net.rx_len
-				);
-				if (parsed >= 0) {
-					size_t used = (size_t)parsed;
-					if (used < st->net.rx_len) {
-						memmove(st->net.rx, st->net.rx + used, st->net.rx_len - used);
-					}
-					st->net.rx_len -= used;
-				}
-			}
 			cyw43_arch_lwip_end();
 
-			if (parsed < 0) {
+			if (!rp2350_http_stream_h2_pump(st, deadline)) {
 				stream->eof = 1;
 				return 0;
 			}
-			/* Parsed frames may have produced body bytes even if FIN is also seen. */
+			cyw43_arch_lwip_begin();
+			if (absolute_time_diff_us(st->net.last_rx_time, get_absolute_time()) <= 100000) {
+				idle_deadline = make_timeout_time_ms(st->timeout_ms);
+			}
+			cyw43_arch_lwip_end();
 			if (st->h2.body_len > 0) {
 				continue;
 			}
@@ -957,20 +992,7 @@ static ssize_t rp2350_http_stream_read(php_stream *stream, char *buf, size_t cou
 				return 0;
 			}
 
-			if (parsed > 0) {
-				int rc = nghttp2_session_send(st->h2_session);
-				if (rc != 0) {
-					stream->eof = 1;
-					return 0;
-				}
-				if (!rp2350_h2_flush_tx(&st->h2, &st->net, deadline)) {
-					stream->eof = 1;
-					return 0;
-				}
-				continue;
-			}
-
-			if (time_reached(deadline)) {
+			if (time_reached(idle_deadline) || time_reached(hard_deadline)) {
 				stream->eof = 1;
 				return 0;
 			}
@@ -1144,7 +1166,10 @@ static php_stream *rp2350_http_stream_opener(
 	rp2350_http_request_opts_t req_opts;
 
 	rp2350_http_request_opts_init(&req_opts);
-#define RP2350_HTTP_OPEN_FAIL() do { rp2350_http_request_opts_cleanup(&req_opts); return NULL; } while (0)
+#define RP2350_HTTP_OPEN_FAIL() do { \
+	rp2350_http_request_opts_cleanup(&req_opts); \
+	return NULL; \
+} while (0)
 
 	if (!filename || (strncmp(filename, "http://", 7) != 0 && strncmp(filename, "https://", 8) != 0)) {
 		RP2350_HTTP_OPEN_FAIL();
@@ -1371,7 +1396,17 @@ static php_stream *rp2350_http_stream_opener(
 				RP2350_HTTP_OPEN_FAIL();
 			}
 
-			rc = nghttp2_submit_settings(st->h2_session, NGHTTP2_FLAG_NONE, NULL, 0);
+			{
+				nghttp2_settings_entry iv[3];
+				memset(iv, 0, sizeof(iv));
+				iv[0].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+				iv[0].value = 0;
+				iv[1].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+				iv[1].value = 4096;
+				iv[2].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
+				iv[2].value = 65535;
+				rc = nghttp2_submit_settings(st->h2_session, NGHTTP2_FLAG_NONE, iv, 3);
+			}
 			if (rc != 0) {
 				if (options & REPORT_ERRORS) {
 					php_error_docref(NULL, E_WARNING, "https wrapper: h2 submit settings failed: %d", rc);
@@ -1413,6 +1448,12 @@ static php_stream *rp2350_http_stream_opener(
 			nva[nvlen].value = (uint8_t *)((req_opts.user_agent && req_opts.user_agent[0] != '\0') ? req_opts.user_agent : "rp2350-php");
 			nva[nvlen].namelen = sizeof("user-agent") - 1;
 			nva[nvlen].valuelen = strlen((char *)nva[nvlen].value);
+			nvlen++;
+
+			nva[nvlen].name = (uint8_t *)"accept";
+			nva[nvlen].value = (uint8_t *)"*/*";
+			nva[nvlen].namelen = sizeof("accept") - 1;
+			nva[nvlen].valuelen = sizeof("*/*") - 1;
 			nvlen++;
 
 			if (req_opts.headers && req_opts.headers_len > 0) {
@@ -1459,6 +1500,14 @@ static php_stream *rp2350_http_stream_opener(
 				if (options & REPORT_ERRORS) {
 					php_error_docref(NULL, E_WARNING, "https wrapper: h2 send failed: rc=%d lwip=%d", rc, (int)st->net.last_err);
 				}
+				rp2350_h2_altcp_close(&st->net);
+				free(st->net.rx);
+				nghttp2_session_del(st->h2_session);
+				nghttp2_session_callbacks_del(st->h2_callbacks);
+				efree(st);
+				RP2350_HTTP_OPEN_FAIL();
+			}
+			if (!rp2350_http_stream_h2_pump(st, deadline)) {
 				rp2350_h2_altcp_close(&st->net);
 				free(st->net.rx);
 				nghttp2_session_del(st->h2_session);

@@ -72,9 +72,9 @@ function tft_theme() {
     return $theme;
 }
 
-function tft_status_base_cfb() {
+function tft_status_base_cfb($force = false) {
     static $built = false;
-    if ($built) {
+    if ($built && !$force) {
         return;
     }
     $c = tft_theme();
@@ -95,7 +95,7 @@ function tft_status_base_cfb() {
     $built = true;
 }
 
-function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw = 0, $backlight_pct = 100) {
+function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw = 0, $backlight_pct = 100, $clear_tft = false) {
     static $tft_prev = null;
     $render_t0 = microtime(true);
     $has_epd = function_exists('mcu_epd_render');
@@ -205,7 +205,10 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
     if ($has_tft) {
         $t0 = microtime(true);
         $c = tft_theme();
-        tft_status_base_cfb();
+        if ($clear_tft) {
+            mcu_tft_fb_clear($c['bg']);
+        }
+        tft_status_base_cfb($clear_tft);
         $t_base = microtime(true);
 
         $curr = [
@@ -276,6 +279,7 @@ function redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_sta
 }
 
 $mode_logo = false;
+$mode_web = false;
 $prev_mask = 0;
 $needs_redraw = false;
 $next_log_s = time() + 1;
@@ -304,7 +308,7 @@ run_hash_smoke();
 run_json_smoke();
 
 /* Initial render immediately, before Wi-Fi/bootstrap work. */
-redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct);
+redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, true);
 
 $wifi_ssid = getenv('WIFI_SSID');
 $wifi_pass = getenv('WIFI_PASS');
@@ -449,12 +453,24 @@ while (true) {
 
     $mask = mcu_button_wait($remaining_ms);
     if ($mask !== false) {
+        $a_down = (($mask & (1 << MCU_BTN_A)) !== 0);
+        $a_was_down = (($prev_mask & (1 << MCU_BTN_A)) !== 0);
         $c_down = (($mask & (1 << MCU_BTN_C)) !== 0);
         $c_was_down = (($prev_mask & (1 << MCU_BTN_C)) !== 0);
         $up_down = (($mask & (1 << MCU_BTN_UP)) !== 0);
         $up_was_down = (($prev_mask & (1 << MCU_BTN_UP)) !== 0);
         $down_down = (($mask & (1 << MCU_BTN_DOWN)) !== 0);
         $down_was_down = (($prev_mask & (1 << MCU_BTN_DOWN)) !== 0);
+        $b_down = (($mask & (1 << MCU_BTN_B)) !== 0);
+        $b_was_down = (($prev_mask & (1 << MCU_BTN_B)) !== 0);
+        if ($a_down && !$a_was_down) {
+            $mode_logo = false;
+            $mode_web = false;
+            redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct, true);
+            $needs_redraw = false;
+            $next_redraw_at = microtime(true) + ($frame_interval_us / 1000000.0);
+            print "mode:text\n";
+        }
         if ($up_down && !$up_was_down && function_exists('mcu_tft_backlight')) {
             $backlight_pct += 10;
             if ($backlight_pct > 100) {
@@ -478,13 +494,75 @@ while (true) {
             print "\n";
         }
         if ($c_down && !$c_was_down) {
-            $mode_logo = !$mode_logo;
+            $mode_web = false;
+            $mode_logo = true;
             $needs_redraw = true;
-            print "mode:";
-            print $mode_logo ? "logo\n" : "text\n";
+            print "mode:logo\n";
+        }
+        if ($b_down && !$b_was_down) {
+            $url = 'https://www.php.net/';
+            $ctx = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => 10.0,
+                    'header' => "User-Agent: rp2350-php/1\r\nAccept: text/html,*/*\r\nConnection: close\r\n",
+                ],
+            ]);
+            print "web:fetch:url:";
+            print $url;
+            print "\n";
+            $body = @file_get_contents($url, false, $ctx);
+            if ($body === false) {
+                print "web:php.net:fail\n";
+            } else {
+                $head = substr($body, 0, 64);
+                $head = str_replace(["\r", "\n", "\t"], ' ', $head);
+                while (strpos($head, '  ') !== false) {
+                    $head = str_replace('  ', ' ', $head);
+                }
+                print "web:php.net:ok len:";
+                print strlen($body);
+                print " head:";
+                print $head;
+                print "\n";
+                $mode_logo = false;
+                $mode_web = true;
+                if (function_exists('mcu_tft_clear')) {
+                    mcu_tft_clear(mcu_rgb565(0, 0, 0));
+                }
+                if (function_exists('mcu_tft_fb_clear')) {
+                    $bg = mcu_rgb565(7, 12, 20);
+                    $panel = mcu_rgb565(18, 28, 40);
+                    $fg = mcu_rgb565(245, 248, 250);
+                    $accent = mcu_rgb565(0, 180, 220);
+                    mcu_tft_fb_clear($bg);
+                    mcu_tft_fb_fill_rect(8, 8, MCU_TFT_WIDTH - 16, MCU_TFT_HEIGHT - 16, $panel);
+                    mcu_tft_fb_fill_rect(8, 8, MCU_TFT_WIDTH - 16, 6, $accent);
+                    mcu_tft_fb_draw_text(18, 20, 'WEB PHP.NET', $fg, 2, 2);
+                    $remaining = $body;
+                    $line_len = 34;
+                    $max_lines = 12;
+                    $y = 56;
+                    for ($i = 0; $i < $max_lines && $remaining !== ''; $i++) {
+                        $line = substr($remaining, 0, $line_len);
+                        $remaining = (string)substr($remaining, strlen($line));
+                        $line = str_replace(["\r", "\n", "\t"], ' ', $line);
+                        while (strpos($line, '  ') !== false) {
+                            $line = str_replace('  ', ' ', $line);
+                        }
+                        $line = trim($line);
+                        mcu_tft_fb_draw_text(14, $y, $line !== '' ? $line : ' ', $fg, 1, 1);
+                        $y += 14;
+                    }
+                    mcu_tft_fb_render();
+                }
+            }
         }
         $prev_mask = $mask;
         $led_mask = $mask;
+        if ($mode_web || $mode_logo) {
+            continue;
+        }
         if ($needs_redraw) {
             $now_redraw = microtime(true);
             if ($next_redraw_at <= 0.0 || $now_redraw >= $next_redraw_at) {
@@ -529,7 +607,7 @@ while (true) {
         $prev_light_raw = $light_raw;
     }
 
-    if ($needs_redraw) {
+    if (!$mode_web && $needs_redraw) {
         $now_redraw = microtime(true);
         if ($next_redraw_at <= 0.0 || $now_redraw >= $next_redraw_at) {
             redraw_mode($mode_logo, $batt_pct, $usb_connected, $charging, $wifi_status, $wifi_ip4, $wifi_ip6, $light_raw, $backlight_pct);

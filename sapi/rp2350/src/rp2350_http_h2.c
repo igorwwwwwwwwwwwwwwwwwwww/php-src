@@ -566,7 +566,17 @@ bool rp2350_h2_get_body_ex(
 		goto cleanup;
 	}
 
-	rc = nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, NULL, 0);
+	{
+		nghttp2_settings_entry iv[3];
+		memset(iv, 0, sizeof(iv));
+		iv[0].settings_id = NGHTTP2_SETTINGS_ENABLE_PUSH;
+		iv[0].value = 0;
+		iv[1].settings_id = NGHTTP2_SETTINGS_HEADER_TABLE_SIZE;
+		iv[1].value = 4096;
+		iv[2].settings_id = NGHTTP2_SETTINGS_INITIAL_WINDOW_SIZE;
+		iv[2].value = 65535;
+		rc = nghttp2_submit_settings(session, NGHTTP2_FLAG_NONE, iv, 3);
+	}
 	if (rc != 0) {
 		php_error_docref(NULL, E_WARNING, "h2 submit settings failed: %d", rc);
 		goto cleanup;

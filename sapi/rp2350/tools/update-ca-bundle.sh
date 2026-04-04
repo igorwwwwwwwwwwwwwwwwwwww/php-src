@@ -15,6 +15,8 @@ mapfile -t keep_subjects <<'SUBJ'
 SSL.com TLS ECC Root CA 2022
 SSL.com TLS Transit ECC CA R2
 AAA Certificate Services
+ISRG Root X1
+ISRG Root X2
 SUBJ
 
 TMPDIR=$(mktemp -d)

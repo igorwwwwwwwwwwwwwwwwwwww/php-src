@@ -100,7 +100,6 @@ int rp2350_h2_on_stream_close_cb(
 	uint32_t error_code,
 	void *user_data
 );
-
 err_t rp2350_h2_altcp_connected_cb(void *arg, struct altcp_pcb *conn, err_t err);
 err_t rp2350_h2_altcp_recv_cb(void *arg, struct altcp_pcb *conn, struct pbuf *p, err_t err);
 void rp2350_h2_altcp_err_cb(void *arg, err_t err);

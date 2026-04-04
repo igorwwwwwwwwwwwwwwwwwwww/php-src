@@ -182,14 +182,61 @@ Current limitation:
 - HTTPS uses a bundled Mozilla CA root set (`certs/mozilla-cacert.pem`) with verification required.
 - Refresh the embedded CA bundle with:
   - `sapi/rp2350/tools/update-ca-bundle.sh`
-- CA chain-selection note (`example.com` / Cloudflare):
+- CA chain-selection note (`example.com` / Cloudflare / php.net):
   - Different TLS clients can receive different chain variants from the same host.
   - On this target, Cloudflare may serve a chain ending at `AAA Certificate Services` instead of `SSL.com TLS ECC Root CA 2022`.
-  - To keep HTTPS verification stable on-device, the curated embedded bundle intentionally includes `AAA Certificate Services` (via `certs/extra/aaa_certificate_services.pem`) in addition to selected Mozilla roots.
+  - `www.php.net` currently validates on-device via a chain anchored at `ISRG Root X1`; adding `ISRG Root X2` alone was not sufficient for the chain mbedTLS actually validated on target.
+  - A successful on-device php.net handshake was observed with:
+    - leaf: `CN=*.php.net`
+    - intermediate: `CN=E7, O=Let's Encrypt`
+    - trust anchor: `CN=ISRG Root X1, O=Internet Security Research Group`
+  - To keep HTTPS verification stable on-device, the curated embedded bundle intentionally includes `AAA Certificate Services` (via `certs/extra/aaa_certificate_services.pem`) and `ISRG Root X1` in addition to selected Mozilla roots.
+  - If a site fails verification while a desktop browser succeeds, inspect the actual served chain seen by the target and then extend `tools/update-ca-bundle.sh` / regenerate `src/rp2350_ca_bundle.c`.
 - TLS version note:
   - With current Pico lwIP + mbedTLS integration in this firmware, HTTPS negotiates TLS 1.2 in practice (`ver=TLSv1.2`).
   - A TLS-1.3-only client configuration was tested and currently fails to connect on this target.
   - Keep TLS 1.2 enabled as the compatibility baseline for now.
+- php.net / large-TLS-record note:
+  - An on-device `https://www.php.net/` HTTP/2 body stall was traced to lwIP TCP receive-window sizing, not to nghttp2 request formatting.
+  - The observed failure mode was:
+    - TLS handshake OK
+    - ALPN `h2`
+    - response HEADERS / `:status=200` received
+    - no body delivered to the PHP stream before timeout
+  - Root cause:
+    - php.net sent a large TLS 1.2 application record (~16.4 KB)
+    - mbedTLS did not release plaintext until enough ciphertext for that record had arrived
+    - with the default lwIP receive window, the transfer stalled exactly at the effective `TCP_WND`
+  - This was verified empirically on target:
+    - default lwIP `TCP_WND = 4 * TCP_MSS = 2144` bytes -> stall at ~2144 bytes
+    - raised `TCP_WND = 16 * TCP_MSS = 8576` bytes -> stall moved to ~8576 bytes
+    - raised `TCP_WND = 32 * TCP_MSS = 17152` bytes -> php.net body completed successfully
+  - Current fix in `lwipopts.h`:
+    - `TCP_WND (32 * TCP_MSS)`
+    - `PBUF_POOL_SIZE 64`
+    - `MEMP_NUM_TCP_SEG 64`
+  - If a site negotiates TLS and H2 successfully but body delivery stalls, suspect lwIP receive-window / buffering limits before blaming nghttp2.
+- How to debug HTTPS / H2 stalls on target:
+  - First separate trust / handshake / H2 / body phases in logs:
+    - DNS resolved?
+    - TCP connected?
+    - TLS connected?
+    - ALPN result?
+    - response status / headers received?
+    - body bytes delivered?
+  - Compare against a host reference probe when possible:
+    - `sapi/rp2350/tools/h2_probe.c`
+    - build with: `cc sapi/rp2350/tools/h2_probe.c -o /tmp/h2_probe $(pkg-config --cflags --libs libnghttp2 openssl)`
+  - If needed, temporarily reintroduce transport/TLS instrumentation in:
+    - active TLS transport: `sapi/rp2350/third_party/pico-sdk/src/rp2_common/pico_lwip/altcp_tls_mbedtls.c`
+    - H2 glue: `sapi/rp2350/src/rp2350_http_h2.c`
+    - stream wrapper / timeout logic: `sapi/rp2350/src/rp2350_http_stream.c`
+  - The most useful questions to answer are:
+    - are more TLS ciphertext records still arriving?
+    - does `mbedtls_ssl_read()` keep returning `MBEDTLS_ERR_SSL_WANT_READ`?
+    - does the stall amount match `TCP_WND`?
+    - does increasing `TCP_WND` move the stall point upward?
+  - If the stall point tracks `TCP_WND`, you are almost certainly looking at a receive-window / buffering problem rather than an H2 framing bug.
 
 ## SWD debug (OpenOCD + GDB)
 

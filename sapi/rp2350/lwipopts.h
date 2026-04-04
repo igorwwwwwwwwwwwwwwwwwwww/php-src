@@ -30,5 +30,8 @@ void rp2350_sntp_set_system_time_us(uint32_t sec, uint32_t us);
 #define LWIP_NETCONN                0
 #define MEM_ALIGNMENT               4
 #define MEM_SIZE                    (64 * 1024)
+#define TCP_WND                     (32 * TCP_MSS)
+#define PBUF_POOL_SIZE              64
+#define MEMP_NUM_TCP_SEG            64
 
 #endif /* _LWIPOPTS_H */
