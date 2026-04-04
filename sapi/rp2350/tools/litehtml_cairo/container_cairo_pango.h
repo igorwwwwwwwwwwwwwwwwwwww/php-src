@@ -3,35 +3,12 @@
 
 #include <litehtml.h>
 #include "container_cairo.h"
+#include "text_backend_pango.h"
 #include <cairo.h>
-#include <pango/pangocairo.h>
-#include <pango/pango-font.h>
-#include <set>
-
-struct cairo_font
-{
-	PangoFontDescription* font;
-	litehtml::pixel_t size;
-	bool underline;
-	bool strikeout;
-	bool overline;
-	litehtml::pixel_t ascent;
-	litehtml::pixel_t descent;
-	int underline_thickness;
-	int underline_position;
-	int strikethrough_thickness;
-	int strikethrough_position;
-	int overline_thickness;
-	int overline_position;
-	int decoration_style;
-	litehtml::web_color decoration_color;
-};
 
 class container_cairo_pango : public container_cairo
 {
-	cairo_surface_t*			m_temp_surface;
-	cairo_t*					m_temp_cr;
-	std::set<std::string>		m_all_fonts;
+	pango_text_backend m_backend;
 public:
 	container_cairo_pango();
 	~container_cairo_pango() override;
